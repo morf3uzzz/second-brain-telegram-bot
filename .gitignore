@@ -1,0 +1,13 @@
+.env
+*.json
+!package.json
+service_account.json
+service_account.json.json
+.venv/
+__pycache__/
+*.py[cod]
+data/settings.json
+.idea/
+.vscode/
+.DS_Store
+*.log
