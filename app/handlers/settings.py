@@ -46,15 +46,15 @@ def create_settings_router(
             await settings_service.update({"summary_chat_id": message.chat.id})
             settings = await settings_service.load()
         kb = _build_main_menu(settings)
-        await message.answer(
+        text = (
             "⚙️ Меню настроек.\n\n"
             "Здесь можно настроить:\n"
-            "🧠 **Инструкции** — как бот понимает ваши данные.\n"
-            "📊 **Сводки** — когда и как присылать отчёты.\n"
-            "🕒 **Таймзона** — чтобы время совпадало с вашим.\n\n"
-            "Выберите нужный раздел 👇",
-            reply_markup=kb.as_markup(),
+            "🧠 Инструкции — как бот понимает ваши данные.\n"
+            "📊 Сводки — когда и как присылать отчёты.\n"
+            "🕒 Таймзона — чтобы время совпадало с вашим.\n\n"
+            "Выберите нужный раздел 👇"
         )
+        await message.answer(text, reply_markup=kb.as_markup())
 
     @router.callback_query(F.data == "menu:main")
     async def show_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
@@ -64,7 +64,15 @@ def create_settings_router(
         await state.clear()
         settings = await settings_service.load()
         kb = _build_main_menu(settings)
-        await _show_menu(callback, "Главное меню настроек:", kb)
+        text = (
+            "⚙️ Меню настроек.\n\n"
+            "Здесь можно настроить:\n"
+            "🧠 Инструкции — как бот понимает ваши данные.\n"
+            "📊 Сводки — когда и как присылать отчёты.\n"
+            "🕒 Таймзона — чтобы время совпадало с вашим.\n\n"
+            "Выберите нужный раздел 👇"
+        )
+        await _show_menu(callback, text, kb)
         await callback.answer()
 
     @router.callback_query(F.data == "menu:prompts")
