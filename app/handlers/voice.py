@@ -353,6 +353,7 @@ def create_voice_router(
         today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
         today_date = _parse_date_value(today_str) or datetime.now().date()
         today_date = _parse_date_value(today_str) or datetime.now().date()
+        today_date = _parse_date_value(today_str) or datetime.now().date()
 
         if not category or not headers or not row:
             await state.clear()
@@ -529,48 +530,18 @@ def create_voice_router(
         data = await state.get_data()
         pending_info = _get_pending_item(data)
         if pending_info:
-            pending, idx, item = pending_info
+            _pending, _idx, item = pending_info
             category = item.get("category", "")
             headers = item.get("headers", [])
             row = item.get("row", [])
             transcript = item.get("transcript", "")
             today_str = item.get("today_str", datetime.now().strftime("%d.%m.%Y"))
-            today_date = _parse_date_value(today_str) or datetime.now().date()
-
-            if text.lower() in {"off", "пропустить", "skip"}:
-                results = data.get("multi_results", [])
-                await _finalize_multi_item(message, message, state, sheets_service, item, results)
-                return
-
-            required = _get_missing_required(headers, row)
-            required_map = {name.lower(): idx for idx, name in required}
-
-            updates = _parse_key_values(text, required_map)
-            if not updates and len(required) == 1:
-                row[required[0][0]] = text
-            else:
-                for key_idx, value in updates.items():
-                    if key_idx < len(row):
-                        row[key_idx] = value
-
-            item["row"] = row
-            pending[idx] = item
-            await state.update_data(pending_items=pending)
-
-            missing_after = _get_missing_required(headers, row)
-            if missing_after:
-                await _prompt_required_item(message, state)
-                return
-
-            results = data.get("multi_results", [])
-            await _finalize_multi_item(message, message, state, sheets_service, item, results)
-            return
-
-        category = data.get("category", "")
-        headers = data.get("headers", [])
-        row = data.get("row", [])
-        transcript = data.get("transcript", "")
-        today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
+        else:
+            category = data.get("category", "")
+            headers = data.get("headers", [])
+            row = data.get("row", [])
+            transcript = data.get("transcript", "")
+            today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
         today_date = _parse_date_value(today_str) or datetime.now().date()
 
         if not category or not headers or not row:
