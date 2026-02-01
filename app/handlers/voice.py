@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 MAX_VOICE_SECONDS = 12 * 60
 LONG_VOICE_SECONDS = 6 * 60
 MAX_TRANSCRIBE_TIMEOUT = 900
+MAX_TG_CHARS = 3500
 
 
 class IntakeState(StatesGroup):
@@ -109,7 +110,7 @@ def create_voice_router(
                 logger.info("Режим вопроса")
                 await status_msg.edit_text("⏳ Ищу по базе, это может занять до минуты.")
                 answer = await qa_service.answer_question(query or transcript, model=model)
-                await status_msg.edit_text(answer)
+                await _send_long_text(status_msg, message, answer)
                 return
 
             if action == "delete":
@@ -817,3 +818,44 @@ def _build_duplicate_keyboard() -> InlineKeyboardBuilder:
     kb.button(text="❌ Не добавлять", callback_data="dup:skip")
     kb.adjust(2)
     return kb
+
+
+async def _send_long_text(status_msg: Message, message: Message, text: str) -> None:
+    chunks = _split_text(text, MAX_TG_CHARS)
+    if not chunks:
+        return
+    try:
+        await status_msg.edit_text(chunks[0])
+    except Exception:
+        await message.answer(chunks[0])
+    for chunk in chunks[1:]:
+        await message.answer(chunk)
+
+
+def _split_text(text: str, max_len: int) -> list[str]:
+    text = text.strip()
+    if len(text) <= max_len:
+        return [text]
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for line in text.splitlines():
+        line_len = len(line) + 1
+        if line_len > max_len:
+            if current:
+                chunks.append("\n".join(current).strip())
+                current = []
+                current_len = 0
+            for i in range(0, len(line), max_len):
+                chunks.append(line[i : i + max_len])
+            continue
+        if current_len + line_len > max_len and current:
+            chunks.append("\n".join(current).strip())
+            current = [line]
+            current_len = line_len
+        else:
+            current.append(line)
+            current_len += line_len
+    if current:
+        chunks.append("\n".join(current).strip())
+    return [chunk for chunk in chunks if chunk]
