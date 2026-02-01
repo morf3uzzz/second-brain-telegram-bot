@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from typing import List
 
 from app.services.openai_service import OpenAIService
@@ -15,7 +17,8 @@ class QAService:
         self._sheets = sheets_service
 
     async def answer_question(self, question: str, model: str | None = None) -> str:
-        records = await self._collect_records()
+        filters = _infer_filters(question)
+        records = await self._collect_records(filters)
         if not records:
             return "В базе пока нет данных для поиска."
 
@@ -61,7 +64,7 @@ class QAService:
         final_answer = await self._openai.chat_text(system_prompt, final_prompt, model=model or self._openai.extract_model)
         return _format_blocks(_strip_markdown(final_answer))
 
-    async def _collect_records(self) -> List[str]:
+    async def _collect_records(self, filters: "QueryFilters") -> List[str]:
         exclude = {"settings", "prompts", "inbox", "botsettings"}
         sheet_names = await self._sheets.list_worksheets()
         result: List[str] = []
@@ -69,13 +72,22 @@ class QAService:
         for name in sheet_names:
             if name.strip().lower() in exclude:
                 continue
+            if filters.sheet_names and name.strip().lower() not in filters.sheet_names:
+                continue
             rows = await self._sheets.get_all_values(name)
             if not rows:
                 continue
             headers = rows[0]
+            date_idx = _find_date_index(headers) if filters.start_date else None
             for row in rows[1:]:
                 if not any(cell.strip() for cell in row):
                     continue
+                if filters.start_date:
+                    row_date = _extract_row_date(row, headers, date_idx)
+                    if not row_date:
+                        continue
+                    if row_date < filters.start_date or row_date > filters.end_date:
+                        continue
                 pairs = []
                 for idx, header in enumerate(headers):
                     value = row[idx] if idx < len(row) else ""
@@ -155,3 +167,79 @@ def _format_blocks(text: str) -> str:
         else:
             formatted.append(line)
     return "\n".join(formatted).strip()
+
+
+@dataclass
+class QueryFilters:
+    sheet_names: set[str] | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+
+
+def _infer_filters(question: str) -> QueryFilters:
+    lowered = question.lower()
+    filters = QueryFilters()
+
+    if any(word in lowered for word in ["задач", "task", "to-do", "todo"]):
+        filters.sheet_names = {"задачи", "tasks"}
+
+    today = date.today()
+    if "вчера" in lowered or "yesterday" in lowered:
+        filters.start_date = today - timedelta(days=1)
+        filters.end_date = today - timedelta(days=1)
+        return filters
+    if "позавчера" in lowered:
+        filters.start_date = today - timedelta(days=2)
+        filters.end_date = today - timedelta(days=2)
+        return filters
+
+    match = re.search(
+        r"(?:за\s+последн\w*|последн\w*|за\s+прошл\w*|last)\s+(\d+)\s*(?:дн\w*|days)",
+        lowered,
+    )
+    if match:
+        days = int(match.group(1))
+        days = max(1, min(days, 365))
+        filters.start_date = today - timedelta(days=days - 1)
+        filters.end_date = today
+        return filters
+
+    if "сегодня" in lowered or "today" in lowered:
+        filters.start_date = today
+        filters.end_date = today
+        return filters
+
+    return filters
+
+
+def _find_date_index(headers: List[str]) -> int | None:
+    normalized = [h.strip().lower() for h in headers]
+    preferred = [
+        "дата выполнения",
+        "дата",
+        "дата добавления",
+        "date",
+        "due date",
+    ]
+    for key in preferred:
+        if key in normalized:
+            return normalized.index(key)
+    return None
+
+
+def _extract_row_date(row: List[str], headers: List[str], idx: int | None) -> date | None:
+    if idx is None or idx >= len(row):
+        return None
+    value = row[idx].strip()
+    return _parse_date(value)
+
+
+def _parse_date(value: str) -> date | None:
+    if not value:
+        return None
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
