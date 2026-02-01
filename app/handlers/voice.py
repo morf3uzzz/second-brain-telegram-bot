@@ -37,7 +37,7 @@ from app.utils.auth import is_allowed, user_label
 logger = logging.getLogger(__name__)
 
 MAX_VOICE_SECONDS = 12 * 60
-THINKING_MODE_SECONDS = 4 * 60
+THINKING_MODE_SECONDS = 2 * 60
 LONG_TRANSCRIPT_CHARS = 2500
 MAX_TRANSCRIBE_TIMEOUT = 900
 MAX_TG_CHARS = 3500
