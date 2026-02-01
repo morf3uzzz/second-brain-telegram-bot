@@ -9,7 +9,8 @@ from typing import Optional
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from gspread.exceptions import WorksheetNotFound
 
 from app.prompts import DEFAULT_EXTRACT_USER, DEFAULT_ROUTER_USER, EXTRACT_PROMPT_KEY, ROUTER_PROMPT_KEY
@@ -154,6 +155,14 @@ def create_voice_router(
                     transcript=transcript,
                     today_str=today_str,
                 )
+                if len(missing_required) == 1 and _is_priority_header(missing_required[0][1]):
+                    kb = _build_priority_keyboard()
+                    await status_msg.edit_text(
+                        "⚠️ Нужно выбрать приоритет задачи:",
+                        reply_markup=kb.as_markup(),
+                    )
+                    return
+
                 missing_names = ", ".join(name for _idx, name in missing_required)
                 await status_msg.edit_text(
                     "⚠️ Нужно заполнить обязательные поля:\n"
@@ -199,6 +208,82 @@ def create_voice_router(
                     os.remove(temp_path)
                 except OSError:
                     logger.warning("Failed to remove temp file: %s", temp_path)
+
+    @router.callback_query(IntakeState.waiting_required, F.data == "req:cancel")
+    async def cancel_required(callback: CallbackQuery, state: FSMContext) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        await state.clear()
+        await callback.message.edit_text("Ок, отменил.")
+        await callback.answer()
+
+    @router.callback_query(IntakeState.waiting_required, F.data.startswith("req:priority:"))
+    async def handle_required_priority(callback: CallbackQuery, state: FSMContext) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        value_map = {
+            "low": "Низкий",
+            "medium": "Средний",
+            "high": "Высокий",
+        }
+        code = callback.data.split(":")[-1]
+        value = value_map.get(code)
+        if not value:
+            await callback.answer("Неизвестный приоритет", show_alert=True)
+            return
+
+        data = await state.get_data()
+        category = data.get("category", "")
+        headers = data.get("headers", [])
+        row = data.get("row", [])
+        transcript = data.get("transcript", "")
+        today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
+
+        if not category or not headers or not row:
+            await state.clear()
+            await callback.message.edit_text("⚠️ Не удалось восстановить контекст. Повторите запись.")
+            await callback.answer()
+            return
+
+        idx = None
+        for i, header in enumerate(headers):
+            if _is_priority_header(_display_header(header)):
+                idx = i
+                break
+        if idx is None:
+            await callback.message.edit_text("⚠️ Поле приоритета не найдено.")
+            await callback.answer()
+            return
+
+        if idx < len(row):
+            row[idx] = value
+
+        missing_after = _get_missing_required(headers, row)
+        if missing_after:
+            missing_names = ", ".join(name for _idx, name in missing_after)
+            await state.update_data(row=row)
+            await callback.message.edit_text(
+                "⚠️ Нужно заполнить обязательные поля:\n"
+                f"{missing_names}\n\n"
+                "Напишите ответ так:\n"
+                "Поле=значение; Поле=значение\n"
+                "Пример: Приоритет=Высокий"
+            )
+            await callback.answer()
+            return
+
+        await sheets_service.append_row(category, row)
+        await sheets_service.append_row("Inbox", [today_str, category, transcript])
+        await state.clear()
+        short_text = transcript if len(transcript) <= 300 else transcript[:297] + "..."
+        await callback.message.edit_text(
+            f"✅ Сохранено в '{category}'.\n"
+            f"Суть: {short_text}\n"
+            f"Категория: {category}"
+        )
+        await callback.answer()
 
     @router.message(IntakeState.waiting_required, F.text)
     async def handle_required_fields(message: Message, state: FSMContext) -> None:
@@ -326,3 +411,17 @@ def _parse_key_values(text: str, header_map: dict[str, int]) -> dict[int, str]:
             result[header_map[key_norm]] = value.strip()
 
     return result
+
+
+def _is_priority_header(header: str) -> bool:
+    return "приоритет" in header.strip().lower()
+
+
+def _build_priority_keyboard() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Низкий", callback_data="req:priority:low")
+    kb.button(text="Средний", callback_data="req:priority:medium")
+    kb.button(text="Высокий", callback_data="req:priority:high")
+    kb.button(text="Отмена", callback_data="req:cancel")
+    kb.adjust(3, 1)
+    return kb
