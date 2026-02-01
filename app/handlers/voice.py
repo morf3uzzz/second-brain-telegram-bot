@@ -1259,11 +1259,10 @@ def _extract_sentence(text: str, keywords: list[str]) -> str:
     return text.strip()
 
 
-def _explicit_items_from_transcript(
+def _rule_based_items_from_transcript(
     transcript: str,
     settings: dict[str, str],
 ) -> list[dict[str, str]]:
-    lowered = transcript.lower()
     task_category = _find_category_by_keywords(settings, ["задач", "task", "todo", "to-do"])
     idea_category = _find_category_by_keywords(settings, ["иде", "idea"])
     expense_category = _find_category_by_keywords(settings, ["трат", "расход", "expense", "spend"])
@@ -1271,6 +1270,35 @@ def _explicit_items_from_transcript(
     if not any([task_category, idea_category, expense_category]):
         return []
 
+    sentences = _split_sentences(transcript)
+    items: list[dict[str, str]] = []
+    for sentence in sentences:
+        parts = _split_clauses(sentence)
+        for part in parts:
+            category = _classify_clause(
+                part,
+                task_category,
+                idea_category,
+                expense_category,
+            )
+            if not category:
+                continue
+            if category == task_category:
+                subtasks = _split_task_part(part)
+                for sub in subtasks:
+                    items.append({"category": category, "text": sub})
+            else:
+                items.append({"category": category, "text": part.strip()})
+
+    return items
+
+
+def _split_sentences(text: str) -> list[str]:
+    parts = re.split(r"[.!?]\s+|\n", text)
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _split_clauses(text: str) -> list[str]:
     markers = [
         r"\bтакже\b",
         r"\bдополнительно\b",
@@ -1279,31 +1307,47 @@ def _explicit_items_from_transcript(
         r"\bи еще\b",
         r"\bи у меня\b",
     ]
-    parts = re.split("|".join(markers), transcript, flags=re.IGNORECASE)
-    parts = [part.strip(" ,.-") for part in parts if part.strip()]
+    parts = re.split("|".join(markers), text, flags=re.IGNORECASE)
+    return [part.strip(" ,.-") for part in parts if part.strip()]
 
-    items: list[dict[str, str]] = []
-    for part in parts:
-        part_lower = part.lower()
-        category = ""
-        if task_category and _contains_keywords(part_lower, ["задач", "задача", "нужно", "надо"]):
-            category = task_category
-        if idea_category and _contains_keywords(part_lower, ["иде", "идея", "хочу", "план", "создать"]):
-            category = idea_category
-        if expense_category and _contains_keywords(part_lower, ["потрат", "заплатил", "купил", "расход", "руб", "доллар"]):
-            category = expense_category
 
-        if not category:
-            continue
+def _classify_clause(
+    text: str,
+    task_category: str | None,
+    idea_category: str | None,
+    expense_category: str | None,
+) -> str:
+    lowered = text.lower()
+    scores = []
+    if task_category:
+        task_score = _keyword_score(
+            lowered,
+            ["задач", "задача", "нужно", "надо", "созвон", "позвон", "сделать", "видео"],
+        )
+        scores.append((task_score, task_category))
+    if idea_category:
+        idea_score = _keyword_score(
+            lowered,
+            ["иде", "идея", "хочу", "план", "создать", "курс", "клуб"],
+        )
+        scores.append((idea_score, idea_category))
+    if expense_category:
+        expense_score = _keyword_score(
+            lowered,
+            ["потрат", "заплатил", "купил", "расход", "руб", "доллар", "магазин"],
+        )
+        scores.append((expense_score, expense_category))
 
-        if category == task_category:
-            subtasks = _split_task_part(part)
-            for sub in subtasks:
-                items.append({"category": category, "text": sub})
-        else:
-            items.append({"category": category, "text": part})
+    if not scores:
+        return ""
+    scores.sort(reverse=True, key=lambda item: item[0])
+    if scores[0][0] <= 0:
+        return ""
+    return scores[0][1]
 
-    return items
+
+def _keyword_score(text: str, keywords: list[str]) -> int:
+    return sum(1 for keyword in keywords if keyword in text)
 
 
 def _split_task_part(text: str) -> list[str]:
@@ -1342,9 +1386,9 @@ async def _split_multi_items(
     settings: dict[str, str],
     model: str,
 ) -> list[dict[str, str]]:
-    explicit_items = _explicit_items_from_transcript(transcript, settings)
-    if len(explicit_items) > 1:
-        return explicit_items
+    rule_items = _rule_based_items_from_transcript(transcript, settings)
+    if len(rule_items) > 1:
+        return rule_items
 
     categories_text = "\n".join(
         f"- {name}: {desc}" if desc else f"- {name}"
