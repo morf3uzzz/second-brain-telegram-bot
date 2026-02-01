@@ -843,67 +843,21 @@ def create_voice_router(
             await callback.message.edit_text("Ок, ничего не сохраняю.")
             return
 
-        if action == "inbox":
-            inbox_text = _build_thinking_inbox_text(structured, transcript)
-            await sheets_service.append_row("Inbox", [today_str, "Thinking", inbox_text])
-            await state.clear()
-            await callback.message.edit_text("✅ Сохранено в Inbox.")
+        if action in {"inbox", "other"}:
+            sheet_name = "Inbox" if action == "inbox" else "Other"
+            save_text = _build_thinking_inbox_text(structured, transcript)
+            try:
+                await sheets_service.append_row(sheet_name, [today_str, "Thinking", save_text])
+                await state.clear()
+                await callback.message.edit_text(f"✅ Сохранено в {sheet_name}.")
+            except WorksheetNotFound:
+                await sheets_service.append_row("Inbox", [today_str, "Thinking", save_text])
+                await state.clear()
+                await callback.message.edit_text("⚠️ Лист Other не найден. Сохранил в Inbox.")
             return
 
-        settings = await sheets_service.load_settings()
-        prompts = await sheets_service.get_prompts()
-        extract_prompt = prompts.get(EXTRACT_PROMPT_KEY, DEFAULT_EXTRACT_USER)
-
-        if action == "tasks":
-            tasks = _coerce_list(structured.get("tasks"))
-            if not tasks:
-                await callback.message.edit_text(
-                    "⚠️ В структуре нет задач.",
-                    reply_markup=_build_thinking_keyboard().as_markup(),
-                )
-                return
-            category = _find_category_by_keywords(settings, ["задач", "task", "todo", "to-do"])
-            if not category:
-                await callback.message.edit_text(
-                    "⚠️ Не найден лист для задач. Проверьте название листа.",
-                    reply_markup=_build_thinking_keyboard().as_markup(),
-                )
-                return
-            items = [{"category": category, "text": item, "source": "rule"} for item in tasks]
-        elif action == "ideas":
-            ideas = _coerce_list(structured.get("ideas"))
-            if not ideas:
-                await callback.message.edit_text(
-                    "⚠️ В структуре нет идей.",
-                    reply_markup=_build_thinking_keyboard().as_markup(),
-                )
-                return
-            category = _find_category_by_keywords(settings, ["иде", "idea"])
-            if not category:
-                await callback.message.edit_text(
-                    "⚠️ Не найден лист для идей. Проверьте название листа.",
-                    reply_markup=_build_thinking_keyboard().as_markup(),
-                )
-                return
-            items = [{"category": category, "text": item, "source": "rule"} for item in ideas]
-        else:
-            await callback.message.edit_text("⚠️ Неизвестное действие.")
-            return
-
-        await state.clear()
-        await _process_multi_items(
-            callback.message,
-            callback.message,
-            state,
-            sheets_service,
-            router_service,
-            settings,
-            extract_prompt,
-            today_str,
-            items,
-            model or (await settings_service.load()).openai_model,
-            transcript,
-        )
+        await callback.message.edit_text("⚠️ Неизвестное действие.")
+        return
 
     return router
 
@@ -1424,11 +1378,10 @@ def _format_thinking_blocks(structured: dict) -> str:
 
 def _build_thinking_keyboard() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Сохранить задачи", callback_data="thinking:tasks")
-    kb.button(text="💡 Сохранить идеи", callback_data="thinking:ideas")
-    kb.button(text="📥 Всё в Inbox", callback_data="thinking:inbox")
+    kb.button(text="📥 В Inbox", callback_data="thinking:inbox")
+    kb.button(text="🗂️ В Other", callback_data="thinking:other")
     kb.button(text="❌ Ничего не сохранять", callback_data="thinking:cancel")
-    kb.adjust(2, 2)
+    kb.adjust(2, 1)
     return kb
 
 
@@ -1471,9 +1424,8 @@ async def _handle_thinking_mode(
         "Вот структура:\n\n"
         f"{text}\n\n"
         "Хочешь:\n"
-        "• сохранить задачи\n"
-        "• сохранить идеи\n"
-        "• сохранить всё в “Инбокс”\n"
+        "• сохранить в Inbox\n"
+        "• сохранить в Other\n"
         "• ничего не сохранять"
     )
     await state.set_state(ThinkingState.waiting_choice)
