@@ -15,6 +15,20 @@ class RouterService:
     def _normalize(value: str) -> str:
         return value.strip().lower()
 
+    @staticmethod
+    def _safe_format(template: str, mapping: Dict[str, str]) -> str:
+        tokens: Dict[str, str] = {}
+        result = template
+        for key, value in mapping.items():
+            token = f"__PLACEHOLDER_{key.upper()}__"
+            tokens[token] = value
+            result = result.replace("{" + key + "}", token)
+        # Escape any other braces to avoid format KeyError
+        result = result.replace("{", "{{").replace("}", "}}")
+        for token, value in tokens.items():
+            result = result.replace(token, value)
+        return result
+
     async def classify_category(
         self,
         text: str,
@@ -27,9 +41,9 @@ class RouterService:
             f"- {name}: {desc}" if desc else f"- {name}"
             for name, desc in settings.items()
         )
-        user_prompt = user_prompt_template.format(
-            text=text,
-            categories=categories_text,
+        user_prompt = self._safe_format(
+            user_prompt_template,
+            {"text": text, "categories": categories_text},
         )
         data = await self._openai.chat_json(
             system_prompt=system_prompt,
@@ -58,10 +72,9 @@ class RouterService:
         system_prompt: str = DEFAULT_EXTRACT_SYSTEM,
         model: str | None = None,
     ) -> List[str]:
-        user_prompt = user_prompt_template.format(
-            text=text,
-            headers=headers,
-            today=today_str,
+        user_prompt = self._safe_format(
+            user_prompt_template,
+            {"text": text, "headers": str(headers), "today": today_str},
         )
         data = await self._openai.chat_json(
             system_prompt=system_prompt,
