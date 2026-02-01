@@ -19,6 +19,8 @@ from app.prompts import (
     DEFAULT_MULTI_SYSTEM,
     DEFAULT_MULTI_USER,
     DEFAULT_ROUTER_USER,
+    DEFAULT_THINKING_SYSTEM,
+    DEFAULT_THINKING_USER,
     EXTRACT_PROMPT_KEY,
     ROUTER_PROMPT_KEY,
 )
@@ -35,7 +37,7 @@ from app.utils.auth import is_allowed, user_label
 logger = logging.getLogger(__name__)
 
 MAX_VOICE_SECONDS = 12 * 60
-LONG_VOICE_SECONDS = 6 * 60
+THINKING_MODE_SECONDS = 4 * 60
 LONG_TRANSCRIPT_CHARS = 2500
 MAX_TRANSCRIBE_TIMEOUT = 900
 MAX_TG_CHARS = 3500
@@ -51,6 +53,10 @@ class DuplicateState(StatesGroup):
 
 class CategoryState(StatesGroup):
     selecting = State()
+
+
+class ThinkingState(StatesGroup):
+    waiting_choice = State()
 
 
 def create_voice_router(
@@ -90,7 +96,7 @@ def create_voice_router(
                 )
                 return
 
-            if message.voice.duration > LONG_VOICE_SECONDS:
+            if message.voice.duration > THINKING_MODE_SECONDS:
                 minutes = max(1, round(message.voice.duration / 60))
                 await status_msg.edit_text(
                     f"⏳ Длинное сообщение ({minutes} мин). "
@@ -115,16 +121,24 @@ def create_voice_router(
             bot_settings = await settings_service.load()
             model = bot_settings.openai_model
 
+            if (
+                message.voice.duration >= THINKING_MODE_SECONDS
+                or len(transcript) >= LONG_TRANSCRIPT_CHARS
+            ):
+                await _handle_thinking_mode(
+                    status_msg,
+                    state,
+                    openai_service,
+                    transcript,
+                    today_str,
+                    model,
+                )
+                return
+
             logger.info("Определяю намерение пользователя")
             intent = await intent_service.detect(transcript, model=model)
             action = intent.get("action", "add")
             query = intent.get("query", transcript)
-            if action == "ask" and (
-                message.voice.duration >= LONG_VOICE_SECONDS
-                or len(transcript) >= LONG_TRANSCRIPT_CHARS
-            ) and not _explicit_question_command(transcript):
-                action = "add"
-                query = transcript
 
             if action == "ask":
                 logger.info("Режим вопроса")
@@ -811,6 +825,86 @@ def create_voice_router(
             f"Категория: {category}"
         )
 
+    @router.callback_query(ThinkingState.waiting_choice, F.data.startswith("thinking:"))
+    async def handle_thinking_choice(callback: CallbackQuery, state: FSMContext) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        await callback.answer()
+        data = await state.get_data()
+        structured = data.get("thinking_structured") or {}
+        transcript = data.get("thinking_transcript") or ""
+        today_str = data.get("thinking_today_str") or datetime.now().strftime("%d.%m.%Y")
+        model = data.get("thinking_model") or None
+
+        action = callback.data.split(":", 1)[1]
+        if action == "cancel":
+            await state.clear()
+            await callback.message.edit_text("Ок, ничего не сохраняю.")
+            return
+
+        if action == "inbox":
+            inbox_text = _build_thinking_inbox_text(structured, transcript)
+            await sheets_service.append_row("Inbox", [today_str, "Thinking", inbox_text])
+            await state.clear()
+            await callback.message.edit_text("✅ Сохранено в Inbox.")
+            return
+
+        settings = await sheets_service.load_settings()
+        prompts = await sheets_service.get_prompts()
+        extract_prompt = prompts.get(EXTRACT_PROMPT_KEY, DEFAULT_EXTRACT_USER)
+
+        if action == "tasks":
+            tasks = _coerce_list(structured.get("tasks"))
+            if not tasks:
+                await callback.message.edit_text(
+                    "⚠️ В структуре нет задач.",
+                    reply_markup=_build_thinking_keyboard().as_markup(),
+                )
+                return
+            category = _find_category_by_keywords(settings, ["задач", "task", "todo", "to-do"])
+            if not category:
+                await callback.message.edit_text(
+                    "⚠️ Не найден лист для задач. Проверьте название листа.",
+                    reply_markup=_build_thinking_keyboard().as_markup(),
+                )
+                return
+            items = [{"category": category, "text": item, "source": "rule"} for item in tasks]
+        elif action == "ideas":
+            ideas = _coerce_list(structured.get("ideas"))
+            if not ideas:
+                await callback.message.edit_text(
+                    "⚠️ В структуре нет идей.",
+                    reply_markup=_build_thinking_keyboard().as_markup(),
+                )
+                return
+            category = _find_category_by_keywords(settings, ["иде", "idea"])
+            if not category:
+                await callback.message.edit_text(
+                    "⚠️ Не найден лист для идей. Проверьте название листа.",
+                    reply_markup=_build_thinking_keyboard().as_markup(),
+                )
+                return
+            items = [{"category": category, "text": item, "source": "rule"} for item in ideas]
+        else:
+            await callback.message.edit_text("⚠️ Неизвестное действие.")
+            return
+
+        await state.clear()
+        await _process_multi_items(
+            callback.message,
+            callback.message,
+            state,
+            sheets_service,
+            router_service,
+            settings,
+            extract_prompt,
+            today_str,
+            items,
+            model or (await settings_service.load()).openai_model,
+            transcript,
+        )
+
     return router
 
 
@@ -1293,16 +1387,103 @@ def _explicit_category_signals(text: str) -> set[str]:
     return signals
 
 
-def _explicit_question_command(text: str) -> bool:
-    lowered = text.strip().lower()
-    if "?" in lowered:
-        return True
-    return bool(
-        re.match(
-            r"^(вопрос|спроси|узнай|расскажи|объясни|подскажи|помоги|покажи|найди|сколько|что|как|почему|зачем)\b",
-            lowered,
+def _coerce_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        items = [str(item).strip() for item in value]
+        return [item for item in items if item]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _format_thinking_blocks(structured: dict) -> str:
+    summary = str(structured.get("summary", "")).strip()
+    ideas = _coerce_list(structured.get("ideas"))
+    tasks = _coerce_list(structured.get("tasks"))
+    materials = _coerce_list(structured.get("materials"))
+    other = _coerce_list(structured.get("other"))
+
+    parts: list[str] = []
+    if summary:
+        parts.append(f"Коротко: {summary}")
+
+    sections = [
+        ("Идеи", "💡", ideas),
+        ("Потенциальные задачи", "✅", tasks),
+        ("Материалы / направления", "🧭", materials),
+        ("Прочее", "🗂️", other),
+    ]
+    for title, emoji, items in sections:
+        if not items:
+            continue
+        parts.append(f"\n{emoji} {title}")
+        parts.extend([f"• {item}" for item in items])
+
+    return "\n".join(parts).strip()
+
+
+def _build_thinking_keyboard() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Сохранить задачи", callback_data="thinking:tasks")
+    kb.button(text="💡 Сохранить идеи", callback_data="thinking:ideas")
+    kb.button(text="📥 Всё в Inbox", callback_data="thinking:inbox")
+    kb.button(text="❌ Ничего не сохранять", callback_data="thinking:cancel")
+    kb.adjust(2, 2)
+    return kb
+
+
+def _build_thinking_inbox_text(structured: dict, transcript: str) -> str:
+    blocks = _format_thinking_blocks(structured)
+    if blocks:
+        return f"{blocks}\n\nСырой текст:\n{transcript}".strip()
+    return transcript.strip()
+
+
+async def _handle_thinking_mode(
+    status_msg: Message,
+    state: FSMContext,
+    openai_service: OpenAIService,
+    transcript: str,
+    today_str: str,
+    model: str,
+) -> None:
+    await status_msg.edit_text("🧠 Длинное сообщение. Привожу мысли в порядок...")
+    user_prompt = _safe_format(DEFAULT_THINKING_USER, {"text": transcript})
+    try:
+        structured = await openai_service.chat_json(
+            system_prompt=DEFAULT_THINKING_SYSTEM,
+            user_prompt=user_prompt,
+            model=model,
         )
+    except Exception:
+        logger.exception("Failed to structure long message")
+        structured = {
+            "summary": _make_summary(transcript),
+            "ideas": [],
+            "tasks": [],
+            "materials": [],
+            "other": [transcript],
+        }
+
+    text = _format_thinking_blocks(structured) or transcript
+    prompt = (
+        "Я привел твои мысли в порядок.\n"
+        "Вот структура:\n\n"
+        f"{text}\n\n"
+        "Хочешь:\n"
+        "• сохранить задачи\n"
+        "• сохранить идеи\n"
+        "• сохранить всё в “Инбокс”\n"
+        "• ничего не сохранять"
     )
+    await state.set_state(ThinkingState.waiting_choice)
+    await state.update_data(
+        thinking_structured=structured,
+        thinking_transcript=transcript,
+        thinking_today_str=today_str,
+        thinking_model=model,
+    )
+    await status_msg.edit_text(prompt, reply_markup=_build_thinking_keyboard().as_markup())
 
 
 def _rule_based_items_from_transcript(
