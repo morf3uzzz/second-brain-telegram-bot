@@ -156,10 +156,12 @@ def create_voice_router(
                 )
                 missing_names = ", ".join(name for _idx, name in missing_required)
                 await status_msg.edit_text(
-                    "Нужны уточнения по обязательным полям: "
-                    f"{missing_names}.\n"
-                    "Ответьте в формате: Поле=значение; Поле=значение\n"
-                    "Или напишите 'Отмена'."
+                    "⚠️ Нужно заполнить обязательные поля:\n"
+                    f"{missing_names}\n\n"
+                    "Напишите ответ так:\n"
+                    "Поле=значение; Поле=значение\n"
+                    "Пример: Приоритет=Высокий\n\n"
+                    "Чтобы отменить — напишите «Отмена»."
                 )
                 return
 
@@ -238,9 +240,11 @@ def create_voice_router(
         if missing_after:
             missing_names = ", ".join(name for _idx, name in missing_after)
             await message.answer(
-                "⚠️ Не хватает: "
-                f"{missing_names}.\n"
-                "Ответьте в формате: Поле=значение; Поле=значение"
+                "⚠️ Нужно заполнить обязательные поля:\n"
+                f"{missing_names}\n\n"
+                "Напишите ответ так:\n"
+                "Поле=значение; Поле=значение\n"
+                "Пример: Приоритет=Высокий"
             )
             await state.update_data(row=row)
             return
