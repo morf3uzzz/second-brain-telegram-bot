@@ -117,9 +117,13 @@ def _strip_markdown(text: str) -> str:
 def _format_blocks(text: str) -> str:
     lines = text.splitlines()
     formatted: List[str] = []
+    block_open = False
     for line in lines:
         stripped = line.strip()
         if re.match(r"^\d+\.\s", stripped):
+            if block_open:
+                formatted.append("────────")
+            block_open = True
             number, rest = stripped.split(".", 1)
             rest = rest.strip()
             parts = [part.strip() for part in rest.split(";") if part.strip()]
