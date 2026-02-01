@@ -1235,9 +1235,9 @@ def _ensure_expected_categories(
 
     if idea_category and _contains_keywords(
         lowered,
-        ["иде", "идея", "idea", "мечта", "хочу", "план", "создать"],
+        ["иде", "идея", "idea", "мечта", "план", "создать"],
     ) and not has_category(idea_category):
-        text = _extract_sentence(transcript, ["иде", "идея", "idea", "мечта", "хочу", "план", "создать"])
+        text = _extract_sentence(transcript, ["иде", "идея", "idea", "мечта", "план", "создать"])
         result.append({"category": idea_category, "text": text})
 
     if expense_category and _contains_keywords(
@@ -1272,6 +1272,18 @@ def _extract_sentence(text: str, keywords: list[str]) -> str:
         if any(keyword in lowered for keyword in keywords):
             return part.strip()
     return text.strip()
+
+
+def _explicit_category_signals(text: str) -> set[str]:
+    lowered = text.lower()
+    signals: set[str] = set()
+    if _contains_keywords(lowered, ["задач", "задача", "созвон", "позвон", "нужно", "надо"]):
+        signals.add("task")
+    if _contains_keywords(lowered, ["иде", "идея", "мечта", "план", "создать"]):
+        signals.add("idea")
+    if _contains_keywords(lowered, ["потрат", "заплатил", "купил", "расход", "руб", "доллар", "магазин"]):
+        signals.add("expense")
+    return signals
 
 
 def _rule_based_items_from_transcript(
@@ -1343,7 +1355,7 @@ def _classify_clause(
     if idea_category:
         idea_score = _keyword_score(
             lowered,
-            ["иде", "идея", "хочу", "план", "создать", "курс", "клуб"],
+            ["иде", "идея", "план", "создать", "курс", "клуб", "мечта"],
         )
         scores.append((idea_score, idea_category))
     if expense_category:
@@ -1402,7 +1414,7 @@ async def _split_multi_items(
     model: str,
 ) -> list[dict[str, str]]:
     rule_items = _rule_based_items_from_transcript(transcript, settings)
-    if len(rule_items) > 1:
+    if len(_explicit_category_signals(transcript)) >= 2 and rule_items:
         return rule_items
 
     categories_text = "\n".join(
