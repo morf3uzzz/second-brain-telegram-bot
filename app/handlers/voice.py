@@ -35,6 +35,10 @@ class IntakeState(StatesGroup):
     waiting_required = State()
 
 
+class DuplicateState(StatesGroup):
+    confirming = State()
+
+
 def create_voice_router(
     openai_service: OpenAIService,
     sheets_service: SheetsService,
@@ -197,6 +201,25 @@ def create_voice_router(
                 )
                 return
 
+            duplicate_preview = await _find_duplicate(sheets_service, category, headers, row)
+            if duplicate_preview:
+                await state.set_state(DuplicateState.confirming)
+                await state.update_data(
+                    category=category,
+                    headers=headers,
+                    row=row,
+                    transcript=transcript,
+                    today_str=today_str,
+                    duplicate_preview=duplicate_preview,
+                )
+                await status_msg.edit_text(
+                    "⚠️ Похоже, это дубликат.\n\n"
+                    f"{duplicate_preview}\n\n"
+                    "Добавить новую запись?",
+                    reply_markup=_build_duplicate_keyboard().as_markup(),
+                )
+                return
+
             logger.info("Записываю строку в лист: %s", category)
             await sheets_service.append_row(category, row)
             logger.info("Пишу в Inbox")
@@ -261,8 +284,26 @@ def create_voice_router(
             await callback.answer()
             return
 
-        row = _apply_text_fields(headers, row, transcript)
-        row = _apply_text_fields(headers, row, transcript)
+        duplicate_preview = await _find_duplicate(sheets_service, category, headers, row)
+        if duplicate_preview:
+            await state.set_state(DuplicateState.confirming)
+            await state.update_data(
+                category=category,
+                headers=headers,
+                row=row,
+                transcript=transcript,
+                today_str=today_str,
+                duplicate_preview=duplicate_preview,
+            )
+            await callback.message.edit_text(
+                "⚠️ Похоже, это дубликат.\n\n"
+                f"{duplicate_preview}\n\n"
+                "Добавить новую запись?",
+                reply_markup=_build_duplicate_keyboard().as_markup(),
+            )
+            await callback.answer()
+            return
+
         row = _apply_text_fields(headers, row, transcript)
         await sheets_service.append_row(category, row)
         await sheets_service.append_row("Inbox", [today_str, category, transcript])
@@ -334,6 +375,27 @@ def create_voice_router(
             await callback.answer()
             return
 
+        duplicate_preview = await _find_duplicate(sheets_service, category, headers, row)
+        if duplicate_preview:
+            await state.set_state(DuplicateState.confirming)
+            await state.update_data(
+                category=category,
+                headers=headers,
+                row=row,
+                transcript=transcript,
+                today_str=today_str,
+                duplicate_preview=duplicate_preview,
+            )
+            await callback.message.edit_text(
+                "⚠️ Похоже, это дубликат.\n\n"
+                f"{duplicate_preview}\n\n"
+                "Добавить новую запись?",
+                reply_markup=_build_duplicate_keyboard().as_markup(),
+            )
+            await callback.answer()
+            return
+
+        row = _apply_text_fields(headers, row, transcript)
         await sheets_service.append_row(category, row)
         await sheets_service.append_row("Inbox", [today_str, category, transcript])
         await state.clear()
@@ -344,6 +406,46 @@ def create_voice_router(
             f"Суть: {short_text}\n"
             f"Категория: {category}"
         )
+        await callback.answer()
+
+    @router.callback_query(DuplicateState.confirming, F.data == "dup:add")
+    async def confirm_duplicate_add(callback: CallbackQuery, state: FSMContext) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        data = await state.get_data()
+        category = data.get("category", "")
+        headers = data.get("headers", [])
+        row = data.get("row", [])
+        transcript = data.get("transcript", "")
+        today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
+
+        if not category or not headers or not row:
+            await state.clear()
+            await callback.message.edit_text("⚠️ Не удалось восстановить контекст. Повторите запись.")
+            await callback.answer()
+            return
+
+        row = _apply_text_fields(headers, row, transcript)
+        await sheets_service.append_row(category, row)
+        await sheets_service.append_row("Inbox", [today_str, category, transcript])
+        await state.clear()
+        short_text = transcript if len(transcript) <= 300 else transcript[:297] + "..."
+        short_text = _get_summary_value(headers, row) or short_text
+        await callback.message.edit_text(
+            f"✅ Добавлено как новая запись в '{category}'.\n"
+            f"Суть: {short_text}\n"
+            f"Категория: {category}"
+        )
+        await callback.answer()
+
+    @router.callback_query(DuplicateState.confirming, F.data == "dup:skip")
+    async def confirm_duplicate_skip(callback: CallbackQuery, state: FSMContext) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        await state.clear()
+        await callback.message.edit_text("Ок, не добавляю дубликат.")
         await callback.answer()
 
     @router.message(IntakeState.waiting_required, F.text)
@@ -410,6 +512,26 @@ def create_voice_router(
             await state.update_data(row=row)
             return
 
+        duplicate_preview = await _find_duplicate(sheets_service, category, headers, row)
+        if duplicate_preview:
+            await state.set_state(DuplicateState.confirming)
+            await state.update_data(
+                category=category,
+                headers=headers,
+                row=row,
+                transcript=transcript,
+                today_str=today_str,
+                duplicate_preview=duplicate_preview,
+            )
+            await message.answer(
+                "⚠️ Похоже, это дубликат.\n\n"
+                f"{duplicate_preview}\n\n"
+                "Добавить новую запись?",
+                reply_markup=_build_duplicate_keyboard().as_markup(),
+            )
+            return
+
+        row = _apply_text_fields(headers, row, transcript)
         await sheets_service.append_row(category, row)
         await sheets_service.append_row("Inbox", [today_str, category, transcript])
         await state.clear()
@@ -521,6 +643,89 @@ def _get_summary_value(headers: list[str], row: list[str]) -> str:
     return str(row[idx]).strip()
 
 
+async def _find_duplicate(
+    sheets_service: SheetsService,
+    category: str,
+    headers: list[str],
+    row: list[str],
+    limit: int = 50,
+) -> str | None:
+    try:
+        rows = await sheets_service.get_all_values(category)
+    except Exception:
+        logger.exception("Failed to read sheet for duplicate check: %s", category)
+        return None
+
+    if not rows or len(rows) < 2:
+        return None
+
+    header_row = rows[0]
+    summary_new = _get_value_by_headers(headers, row, {"суть", "описание", "summary"})
+    raw_new = _get_value_by_headers(headers, row, {"сырой текст", "raw text", "original text", "исходный текст"})
+    date_new = _get_value_by_headers(headers, row, {"дата", "дата добавления", "дата выполнения", "date"})
+
+    recent_rows = rows[1:][-limit:]
+    for old in reversed(recent_rows):
+        summary_old = _get_value_by_headers(header_row, old, {"суть", "описание", "summary"})
+        raw_old = _get_value_by_headers(header_row, old, {"сырой текст", "raw text", "original text", "исходный текст"})
+        date_old = _get_value_by_headers(header_row, old, {"дата", "дата добавления", "дата выполнения", "date"})
+
+        if _is_duplicate(summary_new, raw_new, date_new, summary_old, raw_old, date_old):
+            return _format_duplicate_preview(header_row, old)
+
+    return None
+
+
+def _is_duplicate(
+    summary_new: str,
+    raw_new: str,
+    date_new: str,
+    summary_old: str,
+    raw_old: str,
+    date_old: str,
+) -> bool:
+    if summary_new and summary_old and _normalize_text(summary_new) == _normalize_text(summary_old):
+        return _same_or_empty(date_new, date_old)
+    if raw_new and raw_old and _normalize_text(raw_new) == _normalize_text(raw_old):
+        return _same_or_empty(date_new, date_old)
+    return False
+
+
+def _same_or_empty(left: str, right: str) -> bool:
+    if not left or not right:
+        return True
+    return _normalize_text(left) == _normalize_text(right)
+
+
+def _get_value_by_headers(headers: list[str], row: list[str], names: set[str]) -> str:
+    idx = _find_header_index(headers, names)
+    if idx is None or idx >= len(row):
+        return ""
+    return str(row[idx]).strip()
+
+
+def _format_duplicate_preview(headers: list[str], row: list[str]) -> str:
+    date_value = _get_value_by_headers(headers, row, {"дата", "дата добавления", "дата выполнения", "date"})
+    summary_value = _get_value_by_headers(headers, row, {"суть", "описание", "summary", "на что потрачено"})
+    raw_value = _get_value_by_headers(headers, row, {"сырой текст", "raw text", "original text", "исходный текст"})
+
+    lines = []
+    if date_value:
+        lines.append(f"📅 Дата: {_shorten(date_value)}")
+    if summary_value:
+        lines.append(f"📝 Суть: {_shorten(summary_value)}")
+    if raw_value and _normalize_text(raw_value) != _normalize_text(summary_value):
+        lines.append(f"🗣️ Сырой текст: {_shorten(raw_value, 120)}")
+    return "\n".join(lines) if lines else "Похожая запись найдена."
+
+
+def _shorten(value: str, limit: int = 80) -> str:
+    value = value.strip()
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3].rstrip() + "..."
+
+
 def _find_header_index(headers: list[str], names: set[str]) -> int | None:
     for idx, header in enumerate(headers):
         header_norm = _display_header(header).lower().strip()
@@ -602,5 +807,13 @@ def _build_required_keyboard() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="Пропустить", callback_data="req:skip")
     kb.button(text="Отмена", callback_data="req:cancel")
+    kb.adjust(2)
+    return kb
+
+
+def _build_duplicate_keyboard() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Добавить", callback_data="dup:add")
+    kb.button(text="❌ Не добавлять", callback_data="dup:skip")
     kb.adjust(2)
     return kb
