@@ -1258,6 +1258,26 @@ def _extract_sentence(text: str, keywords: list[str]) -> str:
     return text.strip()
 
 
+def _expand_item_text(item_text: str, transcript: str, category: str) -> str:
+    item_text = item_text.strip() or transcript.strip()
+    word_count = len(item_text.split())
+    category_lower = (category or "").lower()
+
+    if any(key in category_lower for key in ["трат", "расход", "expense", "spend"]):
+        keywords = ["потрат", "купил", "заплатил", "руб", "доллар", "подписк", "магазин"]
+    elif any(key in category_lower for key in ["иде", "idea"]):
+        keywords = ["иде", "идея", "хочу", "план", "курс", "запустить", "создать"]
+    elif any(key in category_lower for key in ["задач", "task", "todo"]):
+        keywords = ["задач", "нужно", "надо", "сделать", "созвон", "позвон", "видео"]
+    else:
+        keywords = ["надо", "нужно", "хочу", "потрат", "иде", "задач"]
+
+    expanded = _extract_sentence(transcript, keywords)
+    if len(expanded.split()) > word_count:
+        return expanded
+    return item_text
+
+
 async def _split_multi_items(
     openai_service: OpenAIService,
     transcript: str,
@@ -1320,6 +1340,7 @@ async def _process_multi_items(
     for item in items:
         item_text = item.get("text", "")
         category = item.get("category", "")
+        item_text = _expand_item_text(item_text, transcript, category)
 
         if not category:
             try:
