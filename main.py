@@ -82,6 +82,7 @@ async def main() -> None:
         create_settings_router(
             sheets_service,
             settings_service,
+            summary_service,
             allowed_user_ids=config.allowed_user_ids,
             allowed_usernames=config.allowed_usernames,
         )
