@@ -26,10 +26,12 @@ def create_start_router(
             return
 
         settings = await settings_service.load()
+        if settings.summary_chat_id is None:
+            await settings_service.update({"summary_chat_id": message.chat.id})
+            settings = await settings_service.load()
         kb = InlineKeyboardBuilder()
         kb.button(text="⚙️ Настройки", callback_data="menu:main")
         kb.button(text="❓ Как пользоваться", callback_data="menu:help")
-        kb.button(text="📌 Сводки: этот чат", callback_data="summary:set_chat")
         kb.button(text=f"🕒 Таймзона: {settings.timezone}", callback_data="menu:timezone")
         kb.adjust(1)
 
@@ -38,7 +40,7 @@ def create_start_router(
             "Как пользоваться:\n"
             "1) Отправляйте голосовые — я сам пойму: добавить / вопрос / удалить.\n"
             "2) Если есть обязательные поля (*) и данных нет — я спрошу.\n"
-            "3) «Сводки: этот чат» назначает этот чат для ежедневных/недельных сводок.\n\n"
+            "3) Сводки приходят в этот чат автоматически.\n\n"
             "Дальше всё на кнопках ниже.",
             reply_markup=kb.as_markup(),
         )

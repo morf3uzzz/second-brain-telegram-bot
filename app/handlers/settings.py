@@ -42,13 +42,16 @@ def create_settings_router(
             return
 
         settings = await settings_service.load()
+        if settings.summary_chat_id is None:
+            await settings_service.update({"summary_chat_id": message.chat.id})
+            settings = await settings_service.load()
         kb = _build_main_menu(settings)
         await message.answer(
             "⚙️ Меню настроек.\n\n"
             "Коротко:\n"
             "- Просто отправляйте голосовые — я сам понимаю: добавить / вопрос / удалить.\n"
             "- Обязательные поля помечайте * в заголовках.\n"
-            "- Для сводок сначала выберите чат, потом время.",
+            "- Сводки приходят в этот чат. Ниже можно настроить время.",
             reply_markup=kb.as_markup(),
         )
 
@@ -81,7 +84,7 @@ def create_settings_router(
         await state.clear()
         settings = await settings_service.load()
         kb = _build_summaries_menu(settings)
-        await _show_menu(callback, "Сводки:", kb)
+        await _show_menu(callback, "Сводки (приходят в этот чат):", kb)
         await callback.answer()
 
     @router.callback_query(F.data == "menu:timezone")
@@ -412,7 +415,6 @@ def _build_prompts_menu() -> InlineKeyboardBuilder:
 
 def _build_summaries_menu(settings) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="📌 Этот чат для сводок", callback_data="summary:set_chat")
     kb.button(text="📤 Сводка за сегодня", callback_data="summary:send_daily")
     kb.button(text="📤 Сводка за неделю", callback_data="summary:send_weekly")
     kb.button(
