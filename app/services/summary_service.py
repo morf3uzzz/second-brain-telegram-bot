@@ -17,7 +17,7 @@ class SummaryService:
     async def daily_summary(self, target_date: date) -> Tuple[str, int]:
         rows = await self._get_inbox_rows()
         filtered = [row for row in rows if _parse_date(row[0]) == target_date]
-        return await self._build_summary(filtered, f"за {target_date.isoformat()}")
+        return await self._build_summary(filtered, f"за {_format_date(target_date)}")
 
     async def weekly_summary(self, end_date: date) -> Tuple[str, int]:
         rows = await self._get_inbox_rows()
@@ -28,7 +28,7 @@ class SummaryService:
             if (row_date := _parse_date(row[0])) is not None
             and start_date <= row_date <= end_date
         ]
-        period = f"за период {start_date.isoformat()} — {end_date.isoformat()}"
+        period = f"за период {_format_date(start_date)} — {_format_date(end_date)}"
         return await self._build_summary(filtered, period)
 
     async def _get_inbox_rows(self) -> List[List[str]]:
@@ -91,3 +91,7 @@ def _parse_date(value: str) -> date | None:
 def _normalize_bullets(text: str) -> str:
     lines = [line.strip("-• ").strip() for line in text.splitlines() if line.strip()]
     return "\n".join(f"• {line}" for line in lines[:5])
+
+
+def _format_date(value: date) -> str:
+    return value.strftime("%d.%m.%Y")
