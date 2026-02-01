@@ -130,33 +130,60 @@ def _format_blocks(text: str) -> str:
     lines = text.splitlines()
     formatted: List[str] = []
     block_open = False
+    current_fields: List[str] = []
+
+    def flush_fields() -> None:
+        nonlocal current_fields
+        for field in current_fields:
+            if ":" in field:
+                key, value = field.split(":", 1)
+                key_norm = key.strip().lower()
+                value = _shorten_value(value.strip())
+                prefix = "📅" if key_norm in {"дата", "дата добавления", "date"} else "-"
+                formatted.append(f"   {prefix} {key.strip()}: {value}")
+            else:
+                formatted.append(f"   - {field}")
+        current_fields = []
+
     for line in lines:
         stripped = line.strip()
-        if re.match(r"^\d+\.\s", stripped):
+        header_match = re.match(r"^(?:🧾\s*)?(\d+)\.\s*(.*)$", stripped)
+        if header_match:
             if block_open:
+                flush_fields()
                 formatted.append("────────")
             block_open = True
-            number, rest = stripped.split(".", 1)
-            rest = rest.strip()
-            parts = [part.strip() for part in rest.split(";") if part.strip()]
-            if parts:
-                formatted.append(f"🧾 {number}. {parts[0]}")
-                for part in parts[1:]:
-                    label = part
-                    prefix = "-"
-                    if ":" in part:
-                        key, value = part.split(":", 1)
-                        key_norm = key.strip().lower()
-                        value = _shorten_value(value.strip())
-                        if key_norm in {"дата", "дата добавления"}:
-                            prefix = "📅"
-                        label = f"{key.strip()}: {value}"
-                    formatted.append(f"   {prefix} {label}")
-                formatted.append("")
+            number = header_match.group(1)
+            rest = header_match.group(2).strip()
+            if rest:
+                parts = [part.strip() for part in rest.split(";") if part.strip()]
+                title = ""
+                if parts and ":" not in parts[0]:
+                    title = parts[0]
+                    current_fields.extend(parts[1:])
+                else:
+                    current_fields.extend(parts)
+                header = f"🧾 {number}. {title}".strip()
+                formatted.append(header)
             else:
-                formatted.append(line)
-        else:
-            formatted.append(line)
+                formatted.append(f"🧾 {number}.")
+            continue
+
+        if block_open:
+            if not stripped:
+                continue
+            if stripped == "────────":
+                flush_fields()
+                formatted.append("────────")
+                continue
+            if ":" in stripped:
+                current_fields.append(stripped)
+                continue
+
+        formatted.append(line)
+
+    if block_open:
+        flush_fields()
     return "\n".join(formatted).strip()
 
 
