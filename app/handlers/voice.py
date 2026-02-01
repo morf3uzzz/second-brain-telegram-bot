@@ -40,6 +40,10 @@ class DuplicateState(StatesGroup):
     confirming = State()
 
 
+class CategoryState(StatesGroup):
+    selecting = State()
+
+
 def create_voice_router(
     openai_service: OpenAIService,
     sheets_service: SheetsService,
@@ -151,10 +155,22 @@ def create_voice_router(
             extract_prompt = prompts.get(EXTRACT_PROMPT_KEY, DEFAULT_EXTRACT_USER)
 
             logger.info("Классифицирую категорию (model=%s)", model)
-            category, _reasoning = await asyncio.wait_for(
-                router_service.classify_category(transcript, settings, router_prompt, model=model),
-                timeout=60,
-            )
+            try:
+                category, _reasoning = await asyncio.wait_for(
+                    router_service.classify_category(transcript, settings, router_prompt, model=model),
+                    timeout=60,
+                )
+            except Exception:
+                logger.exception("Failed to classify category")
+                categories = list(settings.keys())
+                await _prompt_category_choice(
+                    status_msg,
+                    state,
+                    categories,
+                    transcript,
+                    today_str,
+                )
+                return
             logger.info("Определил категорию: %s", category)
 
             logger.info("Читаю заголовки листа: %s", category)
@@ -448,6 +464,129 @@ def create_voice_router(
         await state.clear()
         await callback.message.edit_text("Ок, не добавляю дубликат.")
         await callback.answer()
+
+    @router.callback_query(CategoryState.selecting, F.data == "cat:cancel")
+    async def cancel_category_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        await state.clear()
+        await callback.message.edit_text("Ок, отменил.")
+        await callback.answer()
+
+    @router.callback_query(CategoryState.selecting, F.data.startswith("cat:pick:"))
+    async def pick_category(callback: CallbackQuery, state: FSMContext) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+
+        data = await state.get_data()
+        categories = data.get("categories", [])
+        transcript = data.get("transcript", "")
+        today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
+
+        try:
+            index = int(callback.data.split(":")[-1])
+        except ValueError:
+            await callback.answer("Ошибка выбора", show_alert=True)
+            return
+
+        if index < 0 or index >= len(categories):
+            await callback.answer("Неверный выбор", show_alert=True)
+            return
+
+        category = categories[index]
+
+        try:
+            headers = await sheets_service.get_headers(category)
+            if not headers:
+                await callback.message.edit_text("⚠️ Не найден список столбцов для категории.")
+                await state.clear()
+                await callback.answer()
+                return
+
+            prompts = await sheets_service.get_prompts()
+            extract_prompt = prompts.get(EXTRACT_PROMPT_KEY, DEFAULT_EXTRACT_USER)
+
+            bot_settings = await settings_service.load()
+            model = bot_settings.openai_model
+
+            clean_headers = [_clean_header(header) for header in headers]
+            row = await asyncio.wait_for(
+                router_service.extract_row(transcript, clean_headers, today_str, extract_prompt, model=model),
+                timeout=60,
+            )
+            row = _apply_text_fields(headers, row, transcript)
+
+            missing_required = _get_missing_required(headers, row)
+            if missing_required:
+                await state.set_state(IntakeState.waiting_required)
+                await state.update_data(
+                    category=category,
+                    headers=headers,
+                    row=row,
+                    transcript=transcript,
+                    today_str=today_str,
+                )
+                if len(missing_required) == 1 and _is_priority_header(missing_required[0][1]):
+                    kb = _build_priority_keyboard()
+                    await callback.message.edit_text(
+                        "⚠️ Нужно выбрать приоритет задачи:",
+                        reply_markup=kb.as_markup(),
+                    )
+                    await callback.answer()
+                    return
+
+                missing_names = ", ".join(name for _idx, name in missing_required)
+                await callback.message.edit_text(
+                    "⚠️ Нужно заполнить обязательные поля:\n"
+                    f"{missing_names}\n\n"
+                    "Напишите ответ так:\n"
+                    "Поле=значение; Поле=значение\n"
+                    "Пример: Приоритет=Высокий\n\n"
+                    "Чтобы пропустить — нажмите «Пропустить».\n"
+                    "Чтобы отменить — напишите «Отмена».",
+                    reply_markup=_build_required_keyboard().as_markup(),
+                )
+                await callback.answer()
+                return
+
+            duplicate_preview = await _find_duplicate(sheets_service, category, headers, row)
+            if duplicate_preview:
+                await state.set_state(DuplicateState.confirming)
+                await state.update_data(
+                    category=category,
+                    headers=headers,
+                    row=row,
+                    transcript=transcript,
+                    today_str=today_str,
+                    duplicate_preview=duplicate_preview,
+                )
+                await callback.message.edit_text(
+                    "⚠️ Похоже, это дубликат.\n\n"
+                    f"{duplicate_preview}\n\n"
+                    "Добавить новую запись?",
+                    reply_markup=_build_duplicate_keyboard().as_markup(),
+                )
+                await callback.answer()
+                return
+
+            await sheets_service.append_row(category, row)
+            await sheets_service.append_row("Inbox", [today_str, category, transcript])
+            await state.clear()
+            short_text = transcript if len(transcript) <= 300 else transcript[:297] + "..."
+            short_text = _get_summary_value(headers, row) or short_text
+            await callback.message.edit_text(
+                f"✅ Сохранено в '{category}'.\n"
+                f"Суть: {short_text}\n"
+                f"Категория: {category}"
+            )
+            await callback.answer()
+        except Exception:
+            logger.exception("Failed to process category selection")
+            await callback.message.edit_text("⚠️ Не удалось обработать выбор категории. Попробуйте ещё раз.")
+            await state.clear()
+            await callback.answer()
 
     @router.message(IntakeState.waiting_required, F.text)
     async def handle_required_fields(message: Message, state: FSMContext) -> None:
@@ -816,6 +955,39 @@ def _build_duplicate_keyboard() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Добавить", callback_data="dup:add")
     kb.button(text="❌ Не добавлять", callback_data="dup:skip")
+    kb.adjust(2)
+    return kb
+
+
+async def _prompt_category_choice(
+    status_msg: Message,
+    state: FSMContext,
+    categories: list[str],
+    transcript: str,
+    today_str: str,
+) -> None:
+    if not categories:
+        await status_msg.edit_text("⚠️ Категории не найдены. Проверьте лист Settings.")
+        return
+    await state.set_state(CategoryState.selecting)
+    await state.update_data(
+        categories=categories,
+        transcript=transcript,
+        today_str=today_str,
+    )
+    kb = _build_category_keyboard(categories)
+    await status_msg.edit_text(
+        "⚠️ Не смог определить категорию.\n"
+        "Выберите нужную:",
+        reply_markup=kb.as_markup(),
+    )
+
+
+def _build_category_keyboard(categories: list[str]) -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    for idx, name in enumerate(categories):
+        kb.button(text=name, callback_data=f"cat:pick:{idx}")
+    kb.button(text="Отмена", callback_data="cat:cancel")
     kb.adjust(2)
     return kb
 
