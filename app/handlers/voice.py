@@ -1302,20 +1302,22 @@ def _rule_based_items_from_transcript(
     for sentence in sentences:
         parts = _split_clauses(sentence)
         for part in parts:
-            category = _classify_clause(
-                part,
-                task_category,
-                idea_category,
-                expense_category,
-            )
-            if not category:
-                continue
-            if category == task_category:
-                subtasks = _split_task_part(part)
-                for sub in subtasks:
-                    items.append({"category": category, "text": sub, "source": "rule"})
-            else:
-                items.append({"category": category, "text": part.strip(), "source": "rule"})
+            subparts = _split_by_and_if_multi(part)
+            for subpart in subparts:
+                category = _classify_clause(
+                    subpart,
+                    task_category,
+                    idea_category,
+                    expense_category,
+                )
+                if not category:
+                    continue
+                if category == task_category:
+                    subtasks = _split_task_part(subpart)
+                    for sub in subtasks:
+                        items.append({"category": category, "text": sub, "source": "rule"})
+                else:
+                    items.append({"category": category, "text": subpart.strip(), "source": "rule"})
 
     return items
 
@@ -1340,6 +1342,14 @@ def _split_clauses(text: str) -> list[str]:
         r"\bплюс\b",
     ]
     parts = re.split("|".join(markers), text, flags=re.IGNORECASE)
+    return [part.strip(" ,.-") for part in parts if part.strip()]
+
+
+def _split_by_and_if_multi(text: str) -> list[str]:
+    signals = _explicit_category_signals(text)
+    if len(signals) < 2:
+        return [text]
+    parts = re.split(r"\s+и\s+", text, flags=re.IGNORECASE)
     return [part.strip(" ,.-") for part in parts if part.strip()]
 
 
