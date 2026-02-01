@@ -418,7 +418,8 @@ def _build_main_menu(settings) -> InlineKeyboardBuilder:
     kb.button(text="📊 Сводки", callback_data="menu:summaries")
     kb.button(text=f"🕒 Таймзона: {settings.timezone}", callback_data="menu:timezone")
     kb.button(text="❓ Помощь", callback_data="menu:help")
-    kb.adjust(2, 2)
+    kb.button(text="⬅️ Назад", callback_data="menu:start")
+    kb.adjust(2, 2, 1)
     return kb
 
 
