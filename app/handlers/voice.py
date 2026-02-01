@@ -169,6 +169,7 @@ def create_voice_router(
                 await _process_multi_items(
                     status_msg,
                     message,
+                    state,
                     sheets_service,
                     router_service,
                     settings,
@@ -315,13 +316,19 @@ def create_voice_router(
             return
 
         data = await state.get_data()
+        pending_info = _get_pending_item(data)
+        if pending_info:
+            pending, _idx, item = pending_info
+            results = data.get("multi_results", [])
+            await _finalize_multi_item(callback.message, callback.message, state, sheets_service, item, results)
+            await callback.answer()
+            return
+
         category = data.get("category", "")
         headers = data.get("headers", [])
         row = data.get("row", [])
         transcript = data.get("transcript", "")
         today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
-        today_date = _parse_date_value(today_str) or datetime.now().date()
-        today_date = _parse_date_value(today_str) or datetime.now().date()
         today_date = _parse_date_value(today_str) or datetime.now().date()
         today_date = _parse_date_value(today_str) or datetime.now().date()
 
@@ -382,6 +389,41 @@ def create_voice_router(
             return
 
         data = await state.get_data()
+        pending_info = _get_pending_item(data)
+        if pending_info:
+            pending, idx, item = pending_info
+            headers = item.get("headers", [])
+            row = item.get("row", [])
+            transcript = item.get("transcript", "")
+            today_str = item.get("today_str", datetime.now().strftime("%d.%m.%Y"))
+            today_date = _parse_date_value(today_str) or datetime.now().date()
+
+            item_idx = None
+            for i, header in enumerate(headers):
+                if _is_priority_header(_display_header(header)):
+                    item_idx = i
+                    break
+            if item_idx is None:
+                await callback.message.edit_text("⚠️ Поле приоритета не найдено.")
+                await callback.answer()
+                return
+            if item_idx < len(row):
+                row[item_idx] = value
+
+            item["row"] = row
+            pending[idx] = item
+            await state.update_data(pending_items=pending)
+
+            missing_after = _get_missing_required(headers, row)
+            if missing_after:
+                await _prompt_required_item(callback.message, state)
+                await callback.answer()
+                return
+
+            results = data.get("multi_results", [])
+            await _finalize_multi_item(callback.message, callback.message, state, sheets_service, item, results)
+            await callback.answer()
+            return
         category = data.get("category", "")
         headers = data.get("headers", [])
         row = data.get("row", [])
@@ -463,11 +505,51 @@ def create_voice_router(
             await callback.answer("Доступ запрещен", show_alert=True)
             return
         data = await state.get_data()
+        pending_info = _get_pending_item(data)
+        if pending_info:
+            pending, idx, item = pending_info
+            category = item.get("category", "")
+            headers = item.get("headers", [])
+            row = item.get("row", [])
+            transcript = item.get("transcript", "")
+            today_str = item.get("today_str", datetime.now().strftime("%d.%m.%Y"))
+            today_date = _parse_date_value(today_str) or datetime.now().date()
+
+            if text.lower() in {"off", "пропустить", "skip"}:
+                results = data.get("multi_results", [])
+                await _finalize_multi_item(message, message, state, sheets_service, item, results)
+                return
+
+            required = _get_missing_required(headers, row)
+            required_map = {name.lower(): idx for idx, name in required}
+
+            updates = _parse_key_values(text, required_map)
+            if not updates and len(required) == 1:
+                row[required[0][0]] = text
+            else:
+                for key_idx, value in updates.items():
+                    if key_idx < len(row):
+                        row[key_idx] = value
+
+            item["row"] = row
+            pending[idx] = item
+            await state.update_data(pending_items=pending)
+
+            missing_after = _get_missing_required(headers, row)
+            if missing_after:
+                await _prompt_required_item(message, state)
+                return
+
+            results = data.get("multi_results", [])
+            await _finalize_multi_item(message, message, state, sheets_service, item, results)
+            return
+
         category = data.get("category", "")
         headers = data.get("headers", [])
         row = data.get("row", [])
         transcript = data.get("transcript", "")
         today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
+        today_date = _parse_date_value(today_str) or datetime.now().date()
 
         if not category or not headers or not row:
             await state.clear()
@@ -550,6 +632,7 @@ def create_voice_router(
                 timeout=60,
             )
             row = _apply_text_fields(headers, row, transcript)
+            row = _apply_date_fields(headers, row, transcript, _parse_date_value(today_str) or datetime.now().date())
             row = _apply_date_fields(headers, row, transcript, today_date)
 
             missing_required = _get_missing_required(headers, row)
@@ -1171,6 +1254,7 @@ async def _split_multi_items(
 async def _process_multi_items(
     status_msg: Message,
     message: Message,
+    state: FSMContext,
     sheets_service: SheetsService,
     router_service: RouterService,
     settings: dict[str, str],
@@ -1180,6 +1264,7 @@ async def _process_multi_items(
     model: str,
 ) -> None:
     results: list[str] = []
+    pending: list[dict[str, object]] = []
     today_date = _parse_date_value(today_str) or datetime.now().date()
     for item in items:
         item_text = item.get("text", "")
@@ -1213,6 +1298,19 @@ async def _process_multi_items(
             row = _apply_text_fields(headers, row, item_text)
             row = _apply_date_fields(headers, row, item_text, today_date)
 
+            missing_required = _get_missing_required(headers, row)
+            if missing_required:
+                pending.append(
+                    {
+                        "category": category,
+                        "headers": headers,
+                        "row": row,
+                        "transcript": item_text,
+                        "today_str": today_str,
+                    }
+                )
+                continue
+
             duplicate_preview = await _find_duplicate(sheets_service, category, headers, row)
             if duplicate_preview:
                 results.append(f"⚠️ Дубликат пропущен: {category}")
@@ -1226,6 +1324,16 @@ async def _process_multi_items(
         except Exception:
             logger.exception("Failed to process multi item")
             results.append("⚠️ Ошибка при обработке одного пункта.")
+
+    if pending:
+        await state.set_state(IntakeState.waiting_required)
+        await state.update_data(
+            pending_items=pending,
+            pending_index=0,
+            multi_results=results,
+        )
+        await _prompt_required_item(status_msg, state)
+        return
 
     text = "Готово. Я разобрал сообщение на несколько пунктов:\n\n" + "\n".join(results)
     await _send_long_text(status_msg, message, text, safe_mode=True)
@@ -1252,6 +1360,87 @@ async def _send_long_text(
         await message.answer(chunks[0])
     for chunk in chunks[1:]:
         await message.answer(chunk)
+
+
+async def _prompt_required_item(target_msg: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    pending = data.get("pending_items", [])
+    idx = int(data.get("pending_index", 0))
+    if idx < 0 or idx >= len(pending):
+        return
+    item = pending[idx]
+    headers = item.get("headers", [])
+    row = item.get("row", [])
+    missing_required = _get_missing_required(headers, row)
+    if not missing_required:
+        return
+    if len(missing_required) == 1 and _is_priority_header(missing_required[0][1]):
+        kb = _build_priority_keyboard()
+        await target_msg.edit_text(
+            "⚠️ Нужно выбрать приоритет задачи:",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    missing_names = ", ".join(name for _idx, name in missing_required)
+    await target_msg.edit_text(
+        "⚠️ Нужно заполнить обязательные поля:\n"
+        f"{missing_names}\n\n"
+        "Напишите ответ так:\n"
+        "Поле=значение; Поле=значение\n"
+        "Пример: Приоритет=Высокий\n\n"
+        "Можно нажать «Пропустить».",
+        reply_markup=_build_required_keyboard().as_markup(),
+    )
+
+
+def _get_pending_item(data: dict) -> tuple[list[dict], int, dict] | None:
+    pending = data.get("pending_items")
+    if not pending:
+        return None
+    idx = int(data.get("pending_index", 0))
+    if idx < 0 or idx >= len(pending):
+        return None
+    return pending, idx, pending[idx]
+
+
+async def _finalize_multi_item(
+    target_msg: Message,
+    message: Message,
+    state: FSMContext,
+    sheets_service: SheetsService,
+    item: dict,
+    results: list[str],
+) -> None:
+    category = item.get("category", "")
+    headers = item.get("headers", [])
+    row = item.get("row", [])
+    transcript = item.get("transcript", "")
+    today_str = item.get("today_str", datetime.now().strftime("%d.%m.%Y"))
+    today_date = _parse_date_value(today_str) or datetime.now().date()
+
+    row = _apply_text_fields(headers, row, transcript)
+    row = _apply_date_fields(headers, row, transcript, today_date)
+
+    duplicate_preview = await _find_duplicate(sheets_service, category, headers, row)
+    if duplicate_preview:
+        results.append(f"⚠️ Дубликат пропущен: {category}")
+    else:
+        await sheets_service.append_row(category, row)
+        await sheets_service.append_row("Inbox", [today_str, category, transcript])
+        summary = _get_summary_value(headers, row) or _make_summary(transcript)
+        results.append(f"✅ {category}: {summary}")
+
+    data = await state.get_data()
+    pending = data.get("pending_items", [])
+    idx = int(data.get("pending_index", 0)) + 1
+    if idx < len(pending):
+        await state.update_data(pending_index=idx, multi_results=results)
+        await _prompt_required_item(target_msg, state)
+        return
+
+    await state.clear()
+    text = "Готово. Я разобрал сообщение на несколько пунктов:\n\n" + "\n".join(results)
+    await _send_long_text(target_msg, message, text, safe_mode=True)
 
 
 def _split_text(text: str, max_len: int) -> list[str]:
