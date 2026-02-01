@@ -1231,14 +1231,14 @@ def _ensure_expected_categories(
             transcript,
             ["надо", "нужно", "задач", "сделать", "поставить", "видео", "созвон", "позвон", "встрет"],
         )
-        result.append({"category": task_category, "text": text})
+        result.append({"category": task_category, "text": text, "source": "heuristic"})
 
     if idea_category and _contains_keywords(
         lowered,
         ["иде", "идея", "idea", "мечта", "план", "создать"],
     ) and not has_category(idea_category):
         text = _extract_sentence(transcript, ["иде", "идея", "idea", "мечта", "план", "создать"])
-        result.append({"category": idea_category, "text": text})
+        result.append({"category": idea_category, "text": text, "source": "heuristic"})
 
     if expense_category and _contains_keywords(
         lowered,
@@ -1248,7 +1248,7 @@ def _ensure_expected_categories(
             transcript,
             ["потрат", "заплатил", "купил", "расход", "expense", "spend", "руб", "рубл", "доллар", "магазин"],
         )
-        result.append({"category": expense_category, "text": text})
+        result.append({"category": expense_category, "text": text, "source": "heuristic"})
 
     return result
 
@@ -1313,9 +1313,9 @@ def _rule_based_items_from_transcript(
             if category == task_category:
                 subtasks = _split_task_part(part)
                 for sub in subtasks:
-                    items.append({"category": category, "text": sub})
+                items.append({"category": category, "text": sub, "source": "rule"})
             else:
-                items.append({"category": category, "text": part.strip()})
+            items.append({"category": category, "text": part.strip(), "source": "rule"})
 
     return items
 
@@ -1414,7 +1414,7 @@ async def _split_multi_items(
     model: str,
 ) -> list[dict[str, str]]:
     rule_items = _rule_based_items_from_transcript(transcript, settings)
-    if len(_explicit_category_signals(transcript)) >= 2 and rule_items:
+    if len(_explicit_category_signals(transcript)) >= 1 and rule_items:
         return rule_items
 
     categories_text = "\n".join(
@@ -1474,7 +1474,8 @@ async def _process_multi_items(
     for item in items:
         item_text = item.get("text", "")
         category = item.get("category", "")
-        item_text = _expand_item_text(item_text, full_transcript, category)
+        if item.get("source") != "rule":
+            item_text = _expand_item_text(item_text, full_transcript, category)
 
         if not category:
             try:
