@@ -41,7 +41,9 @@ class IntentService:
 
 def _heuristic_intent(text: str) -> Dict[str, str] | None:
     lowered = text.lower()
-    if _contains_any(lowered, ["удали", "удалить", "убери", "отмени", "не надо", "remove", "delete"]):
+    # "не надо" removed because it matches "мне надо" (I need).
+    # "отмени" removed to avoid confusion with "отметить" (mark).
+    if _contains_any(lowered, ["удали", "удалить", "убери", "стереть", "remove", "delete"]):
         return {"action": "delete", "query": text}
     if _contains_any(lowered, ["вопрос", "спроси", "узнай", "что ", "как ", "почему", "?"]):
         return {"action": "ask", "query": text}
