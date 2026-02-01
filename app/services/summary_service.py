@@ -39,20 +39,23 @@ class SummaryService:
 
     async def _build_summary(self, rows: List[List[str]], period: str) -> Tuple[str, int]:
         if not rows:
-            return f"Нет записей {period}.", 0
+            return f"🧾 Сводка {period}\n\n❗️Нет записей.", 0
 
         categories = [row[1].strip() for row in rows if len(row) > 1]
         counts = Counter(categories)
-        stats = ", ".join(f"{cat}: {count}" for cat, count in counts.most_common())
+        stats = "\n".join(f"• {cat}: {count}" for cat, count in counts.most_common())
 
         transcripts = [row[2] for row in rows if len(row) > 2 and row[2].strip()]
         short_texts = [text[:300] for text in transcripts[:50]]
         joined_text = "\n".join(f"- {text}" for text in short_texts)
 
-        system_prompt = "Сделай краткую сводку по заметкам пользователя."
+        system_prompt = (
+            "Сделай краткую сводку по заметкам пользователя. "
+            "Ответ дай в 3-5 коротких пунктах без Markdown."
+        )
         user_prompt = (
             f"Период: {period}\n"
-            f"Статистика по категориям: {stats}\n\n"
+            f"Статистика по категориям:\n{stats}\n\n"
             "Заметки:\n"
             f"{joined_text}\n\n"
             "Сформируй 3-5 коротких пунктов резюме."
@@ -67,9 +70,14 @@ class SummaryService:
             logger.exception("Failed to build LLM summary, sending stats only")
             summary = ""
 
-        header = f"Сводка {period}\nЗаписей: {len(rows)}\nКатегории: {stats}"
+        header = (
+            f"🧾 Сводка {period}\n\n"
+            f"📌 Всего записей: {len(rows)}\n\n"
+            f"📂 Категории:\n{stats}"
+        )
         if summary:
-            return f"{header}\n\nРезюме:\n{summary}", len(rows)
+            bullets = _normalize_bullets(summary)
+            return f"{header}\n\n🧠 Резюме:\n{bullets}", len(rows)
         return header, len(rows)
 
 
@@ -78,3 +86,8 @@ def _parse_date(value: str) -> date | None:
         return datetime.strptime(value, "%Y-%m-%d").date()
     except Exception:
         return None
+
+
+def _normalize_bullets(text: str) -> str:
+    lines = [line.strip("-• ").strip() for line in text.splitlines() if line.strip()]
+    return "\n".join(f"• {line}" for line in lines[:5])
