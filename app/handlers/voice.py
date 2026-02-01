@@ -71,8 +71,12 @@ def create_voice_router(
                 raise ValueError("Empty transcription")
             logger.info("Транскрипция готова за %.2fs, символов=%s", asyncio.get_running_loop().time() - step_start, len(transcript))
 
+            logger.info("Читаю настройки бота")
+            bot_settings = await settings_service.load()
+            model = bot_settings.openai_model
+
             logger.info("Определяю намерение пользователя")
-            intent = await intent_service.detect(transcript)
+            intent = await intent_service.detect(transcript, model=model)
             action = intent.get("action", "add")
             query = intent.get("query", transcript)
 

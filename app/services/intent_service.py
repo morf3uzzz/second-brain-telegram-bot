@@ -10,14 +10,16 @@ class IntentService:
     def __init__(self, openai_service: OpenAIService) -> None:
         self._openai = openai_service
 
-    async def detect(self, text: str) -> Dict[str, str]:
+    async def detect(self, text: str, model: str | None = None) -> Dict[str, str]:
         heuristic = _heuristic_intent(text)
         if heuristic:
             return heuristic
 
         system_prompt = (
             "Ты определяешь намерение пользователя. "
-            "Варианты: add (добавить запись), delete (удалить запись), ask (задать вопрос). "
+            "Варианты: add (добавить, записать, запомнить, отметить), delete (удалить, убрать, стереть), ask (найти, узнать, спросить). "
+            "Если текст похож на новую задачу, заметку или расход — выбирай 'add'. "
+            "Только если явно сказано 'удали' или 'убери' — выбирай 'delete'. "
             "Отвечай строго JSON."
         )
         user_prompt = (
@@ -28,7 +30,7 @@ class IntentService:
         data = await self._openai.chat_json(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            model=self._openai.router_model,
+            model=model or self._openai.router_model,
         )
         action = str(data.get("action", "add")).strip().lower()
         query = str(data.get("query", "")).strip()
