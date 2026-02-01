@@ -128,9 +128,27 @@ def _format_blocks(text: str) -> str:
             rest = rest.strip()
             parts = [part.strip() for part in rest.split(";") if part.strip()]
             if parts:
-                formatted.append(f"{number}. {parts[0]}")
+                formatted.append(f"🧾 {number}. {parts[0]}")
                 for part in parts[1:]:
-                    formatted.append(f"   {part}")
+                    label = part
+                    emoji = "•"
+                    if ":" in part:
+                        key, value = part.split(":", 1)
+                        key_norm = key.strip().lower()
+                        value = value.strip()
+                        emoji_map = {
+                            "дата": "📅",
+                            "дата добавления": "📅",
+                            "дата выполнения": "⏰",
+                            "суть": "📝",
+                            "на что потрачено": "🧾",
+                            "сумма": "💰",
+                            "категория": "🏷️",
+                            "сырой текст": "🗣️",
+                        }
+                        emoji = emoji_map.get(key_norm, "•")
+                        label = f"{key.strip()}: {value}"
+                    formatted.append(f"   {emoji} {label}")
                 formatted.append("")
             else:
                 formatted.append(line)
