@@ -37,7 +37,7 @@ class IntentService:
         query = str(data.get("query", "")).strip()
         if action not in {"add", "delete", "ask"}:
             action = "add"
-        if action == "ask" and _looks_like_add(text) and not _strong_question_signal(text):
+        if action == "ask" and not _strong_question_signal(text):
             action = "add"
             query = ""
         return {"action": action, "query": query}
@@ -64,8 +64,13 @@ def _strong_question_signal(text: str) -> bool:
             "вопрос",
             "спроси",
             "узнай",
+            "расскажи",
+            "объясни",
+            "подскажи",
+            "помоги",
             "покажи",
             "найди",
+            "напомни",
             "сколько",
             "почему",
             "зачем",
