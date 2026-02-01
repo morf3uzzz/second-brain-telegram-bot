@@ -1354,7 +1354,7 @@ def _format_thinking_blocks(structured: dict) -> str:
     summary = str(structured.get("summary", "")).strip()
     ideas = _coerce_list(structured.get("ideas"))
     tasks = _coerce_list(structured.get("tasks"))
-    materials = _coerce_list(structured.get("materials"))
+    expenses = _coerce_list(structured.get("expenses"))
     other = _coerce_list(structured.get("other"))
 
     parts: list[str] = []
@@ -1364,7 +1364,7 @@ def _format_thinking_blocks(structured: dict) -> str:
     sections = [
         ("Идеи", "💡", ideas),
         ("Потенциальные задачи", "✅", tasks),
-        ("Материалы / направления", "🧭", materials),
+        ("Траты", "💸", expenses),
         ("Прочее", "🗂️", other),
     ]
     for title, emoji, items in sections:
@@ -1414,7 +1414,7 @@ async def _handle_thinking_mode(
             "summary": _make_summary(transcript),
             "ideas": [],
             "tasks": [],
-            "materials": [],
+            "expenses": [],
             "other": [transcript],
         }
 
