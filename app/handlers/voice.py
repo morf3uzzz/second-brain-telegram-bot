@@ -144,6 +144,7 @@ def create_voice_router(
                 router_service.extract_row(transcript, clean_headers, today_str, extract_prompt, model=model),
                 timeout=60,
             )
+            row = _apply_text_fields(headers, row, transcript)
 
             missing_required = _get_missing_required(headers, row)
             if missing_required:
@@ -183,6 +184,7 @@ def create_voice_router(
             logger.info("Записал строку")
 
             short_text = transcript if len(transcript) <= 300 else transcript[:297] + "..."
+            short_text = _get_summary_value(headers, row) or short_text
             await status_msg.edit_text(
                 f"✅ Сохранено в '{category}'.\n"
                 f"Суть: {short_text}\n"
@@ -239,10 +241,14 @@ def create_voice_router(
             await callback.answer()
             return
 
+        row = _apply_text_fields(headers, row, transcript)
+        row = _apply_text_fields(headers, row, transcript)
+        row = _apply_text_fields(headers, row, transcript)
         await sheets_service.append_row(category, row)
         await sheets_service.append_row("Inbox", [today_str, category, transcript])
         await state.clear()
         short_text = transcript if len(transcript) <= 300 else transcript[:297] + "..."
+        short_text = _get_summary_value(headers, row) or short_text
         await callback.message.edit_text(
             f"✅ Сохранено в '{category}' без обязательных полей.\n"
             f"Суть: {short_text}\n"
@@ -312,6 +318,7 @@ def create_voice_router(
         await sheets_service.append_row("Inbox", [today_str, category, transcript])
         await state.clear()
         short_text = transcript if len(transcript) <= 300 else transcript[:297] + "..."
+        short_text = _get_summary_value(headers, row) or short_text
         await callback.message.edit_text(
             f"✅ Сохранено в '{category}'.\n"
             f"Суть: {short_text}\n"
@@ -330,17 +337,6 @@ def create_voice_router(
             await state.clear()
             await message.answer("Ок, отменил.")
             return
-        if text.lower() in {"off", "пропустить", "skip"}:
-            await sheets_service.append_row(category, row)
-            await sheets_service.append_row("Inbox", [today_str, category, transcript])
-            await state.clear()
-            short_text = transcript if len(transcript) <= 300 else transcript[:297] + "..."
-            await message.answer(
-                f"✅ Сохранено в '{category}' без обязательных полей.\n"
-                f"Суть: {short_text}\n"
-                f"Категория: {category}"
-            )
-            return
 
         data = await state.get_data()
         category = data.get("category", "")
@@ -352,6 +348,20 @@ def create_voice_router(
         if not category or not headers or not row:
             await state.clear()
             await message.answer("⚠️ Не удалось восстановить контекст. Повторите запись.")
+            return
+
+        if text.lower() in {"off", "пропустить", "skip"}:
+            row = _apply_text_fields(headers, row, transcript)
+            await sheets_service.append_row(category, row)
+            await sheets_service.append_row("Inbox", [today_str, category, transcript])
+            await state.clear()
+            short_text = transcript if len(transcript) <= 300 else transcript[:297] + "..."
+            short_text = _get_summary_value(headers, row) or short_text
+            await message.answer(
+                f"✅ Сохранено в '{category}' без обязательных полей.\n"
+                f"Суть: {short_text}\n"
+                f"Категория: {category}"
+            )
             return
 
         required = _get_missing_required(headers, row)
@@ -385,6 +395,7 @@ def create_voice_router(
         await state.clear()
 
         short_text = transcript if len(transcript) <= 300 else transcript[:297] + "..."
+        short_text = _get_summary_value(headers, row) or short_text
         await message.answer(
             f"✅ Сохранено в '{category}'.\n"
             f"Суть: {short_text}\n"
@@ -457,6 +468,99 @@ def _parse_key_values(text: str, header_map: dict[str, int]) -> dict[int, str]:
             result[header_map[key_norm]] = value.strip()
 
     return result
+
+
+def _apply_text_fields(headers: list[str], row: list[str], transcript: str) -> list[str]:
+    raw_idx = _find_header_index(headers, {"сырой текст", "raw text", "original text", "исходный текст"})
+    summary_idx = _find_header_index(headers, {"суть", "описание", "summary"})
+
+    if raw_idx is not None and raw_idx < len(row):
+        row[raw_idx] = transcript
+
+    if summary_idx is not None and summary_idx < len(row):
+        summary_value = str(row[summary_idx]).strip()
+        raw_value = transcript.strip()
+        raw_col_value = ""
+        if raw_idx is not None and raw_idx < len(row):
+            raw_col_value = str(row[raw_idx]).strip()
+
+        if (
+            not summary_value
+            or _normalize_text(summary_value) == _normalize_text(raw_value)
+            or _normalize_text(summary_value) == _normalize_text(raw_col_value)
+        ):
+            row[summary_idx] = _make_summary(transcript)
+
+    return row
+
+
+def _get_summary_value(headers: list[str], row: list[str]) -> str:
+    idx = _find_header_index(headers, {"суть", "описание", "summary"})
+    if idx is None or idx >= len(row):
+        return ""
+    return str(row[idx]).strip()
+
+
+def _find_header_index(headers: list[str], names: set[str]) -> int | None:
+    for idx, header in enumerate(headers):
+        header_norm = _display_header(header).lower().strip()
+        if header_norm in names:
+            return idx
+    return None
+
+
+def _normalize_text(value: str) -> str:
+    return " ".join(value.lower().split())
+
+
+def _make_summary(text: str) -> str:
+    summary = text.strip()
+    if not summary:
+        return summary
+
+    prefixes = [
+        "слушай",
+        "а слушай",
+        "мне надо",
+        "мне нужно",
+        "нужно",
+        "я хочу",
+        "хочу",
+        "можешь",
+        "можешь пожалуйста",
+        "пожалуйста",
+        "надо",
+    ]
+    changed = True
+    while changed:
+        changed = False
+        lowered = summary.lower().lstrip()
+        for pref in prefixes:
+            if lowered.startswith(pref):
+                summary = summary[len(pref):].lstrip(" ,.-")
+                changed = True
+                break
+
+    suffixes = [
+        "можешь поставить задачку",
+        "можешь поставить задачу",
+        "поставь задачку",
+        "поставь задачу",
+        "добавь в задачи",
+        "добавь задачу",
+        "запомни это",
+        "пожалуйста",
+    ]
+    lowered = summary.lower()
+    for suf in suffixes:
+        if lowered.endswith(suf):
+            summary = summary[: -len(suf)].rstrip(" ,.-")
+            break
+
+    summary = " ".join(summary.split())
+    if len(summary) > 160:
+        summary = summary[:157].rstrip() + "..."
+    return summary or text
 
 
 def _is_priority_header(header: str) -> bool:
