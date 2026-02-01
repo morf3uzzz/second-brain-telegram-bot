@@ -7,9 +7,11 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from datetime import date
 
 from app.prompts import DEFAULT_EXTRACT_USER, DEFAULT_ROUTER_USER, EXTRACT_PROMPT_KEY, ROUTER_PROMPT_KEY
 from app.services.bot_settings_service import BotSettingsService
+from app.services.summary_service import SummaryService
 from app.services.sheets_service import SheetsService
 from app.utils.auth import is_allowed, user_label
 
@@ -26,6 +28,7 @@ class SettingsState(StatesGroup):
 def create_settings_router(
     sheets_service: SheetsService,
     settings_service: BotSettingsService,
+    summary_service: SummaryService,
     allowed_user_ids: list[int],
     allowed_usernames: list[str],
 ) -> Router:
@@ -41,11 +44,11 @@ def create_settings_router(
         settings = await settings_service.load()
         kb = _build_main_menu(settings)
         await message.answer(
-            "⚙️ Настройки.\n\n"
+            "⚙️ Меню настроек.\n\n"
             "Коротко:\n"
-            "- Голосовые: добавить / вопрос / удалить определяются автоматически.\n"
+            "- Просто отправляйте голосовые — я сам понимаю: добавить / вопрос / удалить.\n"
             "- Обязательные поля помечайте * в заголовках.\n"
-            "- Для сводок выберите чат и время.",
+            "- Для сводок сначала выберите чат, потом время.",
             reply_markup=kb.as_markup(),
         )
 
@@ -57,7 +60,7 @@ def create_settings_router(
         await state.clear()
         settings = await settings_service.load()
         kb = _build_main_menu(settings)
-        await callback.message.answer("Главное меню настроек:", reply_markup=kb.as_markup())
+        await _show_menu(callback, "Главное меню настроек:", kb)
         await callback.answer()
 
     @router.callback_query(F.data == "menu:prompts")
@@ -67,7 +70,7 @@ def create_settings_router(
             return
         await state.clear()
         kb = _build_prompts_menu()
-        await callback.message.answer("Промпты:", reply_markup=kb.as_markup())
+        await _show_menu(callback, "Инструкции для ИИ:", kb)
         await callback.answer()
 
     @router.callback_query(F.data == "menu:summaries")
@@ -78,7 +81,7 @@ def create_settings_router(
         await state.clear()
         settings = await settings_service.load()
         kb = _build_summaries_menu(settings)
-        await callback.message.answer("Сводки:", reply_markup=kb.as_markup())
+        await _show_menu(callback, "Сводки:", kb)
         await callback.answer()
 
     @router.callback_query(F.data == "menu:timezone")
@@ -87,8 +90,11 @@ def create_settings_router(
             await callback.answer("Доступ запрещен", show_alert=True)
             return
         await state.set_state(SettingsState.editing_timezone)
-        await callback.message.answer(
-            "Введите таймзону, например: Europe/Moscow или UTC."
+        await _show_menu(
+            callback,
+            "Введите таймзону (например: Europe/Moscow или UTC).\n"
+            "Чтобы отменить — нажмите «Отмена».",
+            _build_cancel_menu("menu:main"),
         )
         await callback.answer()
 
@@ -98,10 +104,11 @@ def create_settings_router(
             await callback.answer("Доступ запрещен", show_alert=True)
             return
         await callback.message.answer(
-            "Краткая помощь:\n"
-            "- Голосом: добавление / вопрос / удаление определяются автоматически.\n"
-            "- Обязательные поля отмечайте * в заголовках.\n"
-            "- Для удаления бот пришлёт список и кнопки с номерами."
+            "Как пользоваться:\n"
+            "1) Отправляйте голосовые — бот сам определит действие.\n"
+            "2) Для удаления пришлёт список и кнопки с номерами.\n"
+            "3) Если есть * в заголовках и поле пустое — бот попросит уточнить.\n"
+            "4) Сводки настраиваются в разделе «Сводки»."
         )
         await callback.answer()
 
@@ -116,11 +123,14 @@ def create_settings_router(
         router_prompt = prompts.get(ROUTER_PROMPT_KEY, DEFAULT_ROUTER_USER)
         extract_prompt = prompts.get(EXTRACT_PROMPT_KEY, DEFAULT_EXTRACT_USER)
 
-        await callback.message.answer(
-            "Текущие prompts:\n\n"
-            f"ROUTER:\n{router_prompt}\n\n"
-            f"EXTRACT:\n{extract_prompt}"
+        text = (
+            "Текущие инструкции:\n\n"
+            "Определение категории:\n"
+            f"{router_prompt}\n\n"
+            "Заполнение таблицы:\n"
+            f"{extract_prompt}"
         )
+        await _show_menu(callback, text, _build_prompts_menu())
         await callback.answer()
 
     @router.callback_query(F.data == "prompt:router")
@@ -130,11 +140,12 @@ def create_settings_router(
             return
         await state.set_state(SettingsState.editing_prompt)
         await state.update_data(prompt_key=ROUTER_PROMPT_KEY)
-        await callback.message.answer(
-            "Отправьте новый prompt для роутера.\n"
+        await _show_menu(
+            callback,
+            "Отправьте текст инструкции для определения категории.\n"
             "Обязательные плейсхолдеры: {text}, {categories}\n"
-            "Чтобы отменить — напишите «Отмена» или нажмите кнопку.",
-            reply_markup=_build_cancel_menu("menu:prompts").as_markup(),
+            "Чтобы отменить — нажмите «Отмена».",
+            _build_cancel_menu("menu:prompts"),
         )
         await callback.answer()
 
@@ -145,11 +156,12 @@ def create_settings_router(
             return
         await state.set_state(SettingsState.editing_prompt)
         await state.update_data(prompt_key=EXTRACT_PROMPT_KEY)
-        await callback.message.answer(
-            "Отправьте новый prompt для извлечения.\n"
+        await _show_menu(
+            callback,
+            "Отправьте текст инструкции для заполнения таблицы.\n"
             "Обязательные плейсхолдеры: {text}, {headers}\n"
-            "Чтобы отменить — напишите «Отмена» или нажмите кнопку.",
-            reply_markup=_build_cancel_menu("menu:prompts").as_markup(),
+            "Чтобы отменить — нажмите «Отмена».",
+            _build_cancel_menu("menu:prompts"),
         )
         await callback.answer()
 
@@ -160,7 +172,9 @@ def create_settings_router(
             return
         chat_id = callback.message.chat.id
         await settings_service.update({"summary_chat_id": chat_id})
-        await callback.message.answer("✅ Этот чат установлен для сводок.")
+        settings = await settings_service.load()
+        kb = _build_summaries_menu(settings)
+        await _show_menu(callback, "✅ Этот чат установлен для сводок.", kb)
         await callback.answer()
 
     @router.callback_query(F.data == "summary:toggle_daily")
@@ -170,7 +184,8 @@ def create_settings_router(
             return
         settings = await settings_service.load()
         await settings_service.update({"daily_enabled": not settings.daily_enabled})
-        await callback.message.answer("✅ Обновил режим ежедневных сводок.")
+        settings = await settings_service.load()
+        await _show_menu(callback, "✅ Режим ежедневных сводок обновлён.", _build_summaries_menu(settings))
         await callback.answer()
 
     @router.callback_query(F.data == "summary:toggle_weekly")
@@ -180,7 +195,8 @@ def create_settings_router(
             return
         settings = await settings_service.load()
         await settings_service.update({"weekly_enabled": not settings.weekly_enabled})
-        await callback.message.answer("✅ Обновил режим еженедельных сводок.")
+        settings = await settings_service.load()
+        await _show_menu(callback, "✅ Режим еженедельных сводок обновлён.", _build_summaries_menu(settings))
         await callback.answer()
 
     @router.callback_query(F.data == "summary:daily_time")
@@ -189,11 +205,12 @@ def create_settings_router(
             await callback.answer("Доступ запрещен", show_alert=True)
             return
         await state.set_state(SettingsState.editing_daily_time)
-        await callback.message.answer(
+        await _show_menu(
+            callback,
             "Введите время ежедневной сводки в формате HH:MM.\n"
             "Пример: 21:00\n"
-            "Чтобы отменить — напишите «Отмена» или нажмите кнопку.",
-            reply_markup=_build_cancel_menu("menu:summaries").as_markup(),
+            "Чтобы отменить — нажмите «Отмена».",
+            _build_cancel_menu("menu:summaries"),
         )
         await callback.answer()
 
@@ -203,11 +220,12 @@ def create_settings_router(
             await callback.answer("Доступ запрещен", show_alert=True)
             return
         await state.set_state(SettingsState.editing_weekly_time)
-        await callback.message.answer(
+        await _show_menu(
+            callback,
             "Введите время еженедельной сводки в формате HH:MM.\n"
             "Пример: 20:00\n"
-            "Чтобы отменить — напишите «Отмена» или нажмите кнопку.",
-            reply_markup=_build_cancel_menu("menu:summaries").as_markup(),
+            "Чтобы отменить — нажмите «Отмена».",
+            _build_cancel_menu("menu:summaries"),
         )
         await callback.answer()
 
@@ -227,8 +245,9 @@ def create_settings_router(
             ("sun", "Вс"),
         ]:
             kb.button(text=label, callback_data=f"summary:set_weekday:{code}")
-        kb.adjust(4, 3)
-        await callback.message.answer("Выберите день недели:", reply_markup=kb.as_markup())
+        kb.button(text="Назад", callback_data="menu:summaries")
+        kb.adjust(4, 3, 1)
+        await _show_menu(callback, "Выберите день недели:", kb)
         await callback.answer()
 
     @router.callback_query(F.data.startswith("summary:set_weekday:"))
@@ -238,7 +257,8 @@ def create_settings_router(
             return
         day_code = callback.data.split(":")[-1]
         await settings_service.update({"weekly_day": day_code})
-        await callback.message.answer("✅ День недели обновлен.")
+        settings = await settings_service.load()
+        await _show_menu(callback, "✅ День недели обновлён.", _build_summaries_menu(settings))
         await callback.answer()
 
     @router.callback_query(F.data == "summary:timezone")
@@ -265,7 +285,11 @@ def create_settings_router(
             return
         await settings_service.update({"daily_time": time_text})
         await state.clear()
-        await message.answer("✅ Время ежедневной сводки обновлено.")
+        settings = await settings_service.load()
+        await message.answer(
+            "✅ Время ежедневной сводки обновлено.",
+            reply_markup=_build_main_menu(settings).as_markup(),
+        )
 
     @router.message(SettingsState.editing_weekly_time, F.text)
     async def save_weekly_time(message: Message, state: FSMContext) -> None:
@@ -278,7 +302,11 @@ def create_settings_router(
             return
         await settings_service.update({"weekly_time": time_text})
         await state.clear()
-        await message.answer("✅ Время еженедельной сводки обновлено.")
+        settings = await settings_service.load()
+        await message.answer(
+            "✅ Время еженедельной сводки обновлено.",
+            reply_markup=_build_main_menu(settings).as_markup(),
+        )
 
     @router.message(SettingsState.editing_timezone, F.text)
     async def save_timezone(message: Message, state: FSMContext) -> None:
@@ -293,7 +321,11 @@ def create_settings_router(
             return
         await settings_service.update({"timezone": tz})
         await state.clear()
-        await message.answer("✅ Таймзона обновлена.")
+        settings = await settings_service.load()
+        await message.answer(
+            "✅ Таймзона обновлена.",
+            reply_markup=_build_main_menu(settings).as_markup(),
+        )
 
     @router.message(SettingsState.editing_prompt, F.text)
     async def save_prompt(message: Message, state: FSMContext) -> None:
@@ -322,7 +354,29 @@ def create_settings_router(
 
         await sheets_service.set_prompt(key, text)
         await state.clear()
-        await message.answer("✅ Prompt сохранен.")
+        settings = await settings_service.load()
+        await message.answer(
+            "✅ Инструкция сохранена.",
+            reply_markup=_build_main_menu(settings).as_markup(),
+        )
+
+    @router.callback_query(F.data == "summary:send_daily")
+    async def send_daily_summary(callback: CallbackQuery) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        text, _count = await summary_service.daily_summary(date.today())
+        await callback.message.answer(text)
+        await callback.answer()
+
+    @router.callback_query(F.data == "summary:send_weekly")
+    async def send_weekly_summary(callback: CallbackQuery) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        text, _count = await summary_service.weekly_summary(date.today())
+        await callback.message.answer(text)
+        await callback.answer()
 
     return router
 
@@ -338,46 +392,48 @@ def _missing_placeholders(key: str, text: str) -> list[str]:
 
 def _build_main_menu(settings) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="Промпты", callback_data="menu:prompts")
-    kb.button(text="Сводки", callback_data="menu:summaries")
-    kb.button(text=f"Таймзона: {settings.timezone}", callback_data="menu:timezone")
-    kb.button(text="Помощь", callback_data="menu:help")
+    kb.button(text="🧠 Инструкции", callback_data="menu:prompts")
+    kb.button(text="📊 Сводки", callback_data="menu:summaries")
+    kb.button(text=f"🕒 Таймзона: {settings.timezone}", callback_data="menu:timezone")
+    kb.button(text="❓ Помощь", callback_data="menu:help")
     kb.adjust(2, 2)
     return kb
 
 
 def _build_prompts_menu() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="Показать prompts", callback_data="prompt:show")
-    kb.button(text="Изменить router", callback_data="prompt:router")
-    kb.button(text="Изменить extract", callback_data="prompt:extract")
-    kb.button(text="Назад", callback_data="menu:main")
+    kb.button(text="📄 Показать инструкции", callback_data="prompt:show")
+    kb.button(text="🏷️ Категория (что это?)", callback_data="prompt:router")
+    kb.button(text="🧾 Заполнение таблицы", callback_data="prompt:extract")
+    kb.button(text="⬅️ Назад", callback_data="menu:main")
     kb.adjust(1)
     return kb
 
 
 def _build_summaries_menu(settings) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="Этот чат для сводок", callback_data="summary:set_chat")
+    kb.button(text="📌 Этот чат для сводок", callback_data="summary:set_chat")
+    kb.button(text="📤 Сводка за сегодня", callback_data="summary:send_daily")
+    kb.button(text="📤 Сводка за неделю", callback_data="summary:send_weekly")
     kb.button(
-        text=f"Ежедневные {'✅' if settings.daily_enabled else '❌'}",
+        text=f"🗓️ Ежедневные {'✅' if settings.daily_enabled else '❌'}",
         callback_data="summary:toggle_daily",
     )
     kb.button(
-        text=f"Еженедельные {'✅' if settings.weekly_enabled else '❌'}",
+        text=f"📅 Еженедельные {'✅' if settings.weekly_enabled else '❌'}",
         callback_data="summary:toggle_weekly",
     )
-    kb.button(text=f"Время дня: {settings.daily_time}", callback_data="summary:daily_time")
-    kb.button(text=f"День недели: {settings.weekly_day}", callback_data="summary:weekly_day")
-    kb.button(text=f"Время недели: {settings.weekly_time}", callback_data="summary:weekly_time")
-    kb.button(text="Назад", callback_data="menu:main")
+    kb.button(text=f"⏰ Время дня: {settings.daily_time}", callback_data="summary:daily_time")
+    kb.button(text=f"📌 День недели: {settings.weekly_day}", callback_data="summary:weekly_day")
+    kb.button(text=f"⏱️ Время недели: {settings.weekly_time}", callback_data="summary:weekly_time")
+    kb.button(text="⬅️ Назад", callback_data="menu:main")
     kb.adjust(1)
     return kb
 
 
 def _build_cancel_menu(callback_data: str) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="Отмена", callback_data=callback_data)
+    kb.button(text="⬅️ Отмена", callback_data=callback_data)
     kb.adjust(1)
     return kb
 
@@ -404,3 +460,10 @@ async def _cancel_flow(message: Message, state: FSMContext, settings_service: Bo
     settings = await settings_service.load()
     kb = _build_main_menu(settings)
     await message.answer("Ок, отменил. Возвращаюсь в главное меню.", reply_markup=kb.as_markup())
+
+
+async def _show_menu(callback: CallbackQuery, text: str, kb: InlineKeyboardBuilder) -> None:
+    try:
+        await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    except Exception:
+        await callback.message.answer(text, reply_markup=kb.as_markup())
