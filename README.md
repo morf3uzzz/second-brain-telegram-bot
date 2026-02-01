@@ -1,5 +1,198 @@
 # Second Brain Telegram Bot
 
+Телеграм‑бот «Второй мозг»: голосовые сообщения превращаются в структурированные записи в Google Таблицах.  
+Whisper делает транскрибацию, GPT — маршрутизацию и извлечение данных по колонкам.
+
+---
+
+## Что умеет
+
+- **Голос → таблица**: расшифровка, выбор категории из Settings, запись в нужный лист и Inbox.
+- **Намерение из голоса** (для коротких сообщений): бот понимает, это **добавление**, **вопрос** или **удаление**.
+- **Thinking‑mode для длинных голосовых** (>2 мин): бот структурирует мысли и просит подтвердить сохранение в лист **«Прочее»** (если листа нет — сохранит в Inbox).
+- **Поиск по базе**: задайте вопрос голосом — бот ответит по данным всех листов категорий.
+- **Удаление**: бот покажет список найденных записей и попросит подтверждение.
+- **Обязательные поля**: добавьте `*` к заголовку (например `Приоритет*`) — бот попросит уточнение.
+- **Сводки**: ежедневные/еженедельные отчеты из Inbox.
+- **Свои промпты**: можно менять через `/settings` (лист Prompts).
+
+---
+
+## Как это работает
+
+1. Голос → Whisper → текст.
+2. Если голос **длиннее 2 минут** → Thinking‑mode:
+   - бот приводит мысли в порядок,
+   - показывает структуру,
+   - просит подтвердить сохранение в «Прочее».
+3. Если голос короткий → определяется намерение:
+   - **add** → запись в нужный лист + Inbox,
+   - **ask** → ответ по базе,
+   - **delete** → выбор кандидата и удаление.
+
+---
+
+## Что нужно
+
+- **Python 3.10+**
+- **Telegram Bot Token** (получить у [@BotFather](https://t.me/BotFather))
+- **OpenAI API Key**
+- **Google Sheets + Service Account** (JSON‑ключ)
+
+---
+
+## Подготовка Google Таблицы
+
+Создайте таблицу и дайте доступ **на редактирование** email сервисного аккаунта.
+
+Обязательные листы:
+- **Settings** — A: название категории (имя листа), B: описание категории.
+- **Inbox** — резервная копия каждой записи.
+- **Прочее** — лист для длинных голосовых (Thinking‑mode).
+
+Опционально:
+- **Prompts** — для кастомных промптов из `/settings`.
+
+Категорийные листы:
+- По одному листу на категорию (название как в Settings, колонка A).
+- Первая строка — заголовки.
+- Обязательные поля помечайте `*` (например `Приоритет*`).
+
+---
+
+## Переменные окружения (.env)
+
+Файл `.env` лежит в корне проекта. Пример в `.env.example`.
+
+| Переменная         | Описание |
+|--------------------|----------|
+| `TELEGRAM_TOKEN`   | токен бота |
+| `OPENAI_API_KEY`   | ключ OpenAI |
+| `GOOGLE_SHEET_ID`  | ID таблицы из URL |
+| `ALLOWED_USER_IDS` | Telegram ID (через запятую) |
+| `ALLOWED_USERNAMES`| usernames без @ (через запятую) |
+
+Также положите **service_account.json** в корень проекта.
+
+---
+
+## Локальный запуск (Mac / Linux)
+
+```bash
+git clone https://github.com/morf3uzzz/second-brain-telegram-bot.git
+cd second-brain-telegram-bot
+
+cp .env.example .env
+# заполните .env и положите service_account.json в корень
+
+python3 -m venv .venv
+.venv/bin/pip install aiogram openai gspread python-dotenv
+.venv/bin/python main.py
+```
+
+---
+
+## Локальный запуск (Windows / PowerShell)
+
+```powershell
+git clone https://github.com/morf3uzzz/second-brain-telegram-bot.git
+cd second-brain-telegram-bot
+
+copy .env.example .env
+# заполните .env и положите service_account.json в корень
+
+python -m venv .venv
+.venv\Scripts\pip install aiogram openai gspread python-dotenv
+.venv\Scripts\python main.py
+```
+
+---
+
+## Деплой на Beget (рекомендуемый способ)
+
+### Почему не архив?
+В панели Beget загрузка архива часто **очень долгая** из‑за большого количества файлов.  
+Самый быстрый путь — **git clone через консоль**.
+
+### 1) Подключение по SSH
+
+После покупки сервера Beget присылает **IP** и **пароль** на почту.
+
+**Mac / Linux:**
+```bash
+ssh root@ВАШ_IP
+```
+
+**Windows (PowerShell):**
+```powershell
+ssh root@ВАШ_IP
+```
+
+### 2) Клонирование проекта на сервер
+
+```bash
+mkdir -p /root/second-brain-bot
+cd /root/second-brain-bot
+git clone https://github.com/morf3uzzz/second-brain-telegram-bot.git .
+```
+
+### 3) Установка зависимостей и запуск
+
+```bash
+cp .env.example .env
+# заполните .env
+
+# загрузите service_account.json в корень проекта
+bash setup.sh
+```
+
+Скрипт `setup.sh`:
+- ставит зависимости,
+- создаёт systemd‑сервис,
+- включает автозапуск.
+
+Проверка:
+```bash
+systemctl status second-brain-bot
+journalctl -u second-brain-bot -f
+```
+
+---
+
+## Как загрузить service_account.json
+
+### Вариант 1: через файловый менеджер Beget
+Просто загрузите файл в корень проекта.
+
+### Вариант 2: через консоль (быстро)
+
+**Mac / Linux:**
+```bash
+scp /путь/к/service_account.json root@ВАШ_IP:/root/second-brain-bot/
+```
+
+**Windows PowerShell:**
+```powershell
+scp C:\путь\к\service_account.json root@ВАШ_IP:/root/second-brain-bot/
+```
+
+---
+
+## Обновление на сервере
+
+```bash
+cd /root/second-brain-bot
+git pull
+systemctl restart second-brain-bot
+```
+
+---
+
+## Лицензия
+
+MIT. См. [LICENSE](LICENSE).
+# Second Brain Telegram Bot
+
 ---
 
 ## Русский
