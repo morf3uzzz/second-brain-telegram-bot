@@ -177,6 +177,7 @@ def create_voice_router(
                     today_str,
                     multi_items,
                     model,
+                    transcript,
                 )
                 return
 
@@ -1333,6 +1334,7 @@ async def _process_multi_items(
     today_str: str,
     items: list[dict[str, str]],
     model: str,
+    full_transcript: str,
 ) -> None:
     results: list[str] = []
     pending: list[dict[str, object]] = []
@@ -1340,7 +1342,7 @@ async def _process_multi_items(
     for item in items:
         item_text = item.get("text", "")
         category = item.get("category", "")
-        item_text = _expand_item_text(item_text, transcript, category)
+        item_text = _expand_item_text(item_text, full_transcript, category)
 
         if not category:
             try:
