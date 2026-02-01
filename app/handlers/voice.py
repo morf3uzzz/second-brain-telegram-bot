@@ -1015,6 +1015,19 @@ def _build_category_keyboard(categories: list[str]) -> InlineKeyboardBuilder:
     return kb
 
 
+def _safe_format(template: str, mapping: dict[str, str]) -> str:
+    tokens: dict[str, str] = {}
+    result = template
+    for key, value in mapping.items():
+        token = f"__PLACEHOLDER_{key.upper()}__"
+        tokens[token] = value
+        result = result.replace("{" + key + "}", token)
+    result = result.replace("{", "{{").replace("}", "}}")
+    for token, value in tokens.items():
+        result = result.replace(token, value)
+    return result
+
+
 async def _split_multi_items(
     openai_service: OpenAIService,
     transcript: str,
@@ -1025,7 +1038,13 @@ async def _split_multi_items(
         f"- {name}: {desc}" if desc else f"- {name}"
         for name, desc in settings.items()
     )
-    user_prompt = DEFAULT_MULTI_USER.format(text=transcript, categories=categories_text)
+    user_prompt = _safe_format(
+        DEFAULT_MULTI_USER,
+        {
+            "text": transcript,
+            "categories": categories_text,
+        },
+    )
     try:
         data = await openai_service.chat_json(
             system_prompt=DEFAULT_MULTI_SYSTEM,
