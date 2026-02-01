@@ -13,7 +13,7 @@ from aiogram.types import Message
 from gspread.exceptions import WorksheetNotFound
 
 from app.prompts import DEFAULT_EXTRACT_USER, DEFAULT_ROUTER_USER, EXTRACT_PROMPT_KEY, ROUTER_PROMPT_KEY
-from app.handlers.delete import DeleteState, build_delete_keyboard
+from app.handlers.delete import DeleteState, build_delete_keyboard, format_delete_list
 from app.services.delete_service import DeleteService
 from app.services.intent_service import IntentService
 from app.services.openai_service import OpenAIService
@@ -101,7 +101,8 @@ def create_voice_router(
                     ]
                 )
                 kb = build_delete_keyboard(candidates)
-                await message.answer("Выберите запись для удаления:", reply_markup=kb.as_markup())
+                text = format_delete_list(candidates)
+                await message.answer(text, reply_markup=kb.as_markup())
                 return
 
             logger.info("Читаю Settings из Google Sheets")

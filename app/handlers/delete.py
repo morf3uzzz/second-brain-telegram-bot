@@ -18,12 +18,18 @@ class DeleteState(StatesGroup):
 
 def build_delete_keyboard(candidates: list[DeleteCandidate]) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    for idx, candidate in enumerate(candidates):
-        text = f"{idx + 1}. {candidate.preview}"
-        kb.button(text=text[:50], callback_data=f"del:pick:{idx}")
+    for idx in range(len(candidates)):
+        kb.button(text=str(idx + 1), callback_data=f"del:pick:{idx}")
     kb.button(text="Отмена", callback_data="del:cancel")
-    kb.adjust(1)
+    kb.adjust(min(5, len(candidates) + 1))
     return kb
+
+
+def format_delete_list(candidates: list[DeleteCandidate]) -> str:
+    lines = ["Выберите запись для удаления (нажмите кнопку с номером):\n"]
+    for idx, c in enumerate(candidates, start=1):
+        lines.append(f"{idx}. {c.preview}\n")
+    return "".join(lines)
 
 
 def create_delete_router(

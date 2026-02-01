@@ -101,15 +101,15 @@ def _row_to_text(headers: List[str], row: List[str]) -> str:
     return " ".join(parts).lower()
 
 
-def _make_preview(sheet_name: str, headers: List[str], row: List[str]) -> str:
+def _make_preview(sheet_name: str, headers: List[str], row: List[str], max_len: int = 400) -> str:
     pairs = []
     for idx, header in enumerate(headers):
         value = row[idx] if idx < len(row) else ""
         if value.strip():
             pairs.append(f"{header}: {value}")
     preview = "; ".join(pairs)
-    if len(preview) > 200:
-        preview = preview[:197] + "..."
+    if len(preview) > max_len:
+        preview = preview[: max_len - 3] + "..."
     return f"[{sheet_name}] {preview}"
 
 
