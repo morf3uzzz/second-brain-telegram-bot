@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Dict
 
 from app.services.openai_service import OpenAIService
@@ -36,6 +37,9 @@ class IntentService:
         query = str(data.get("query", "")).strip()
         if action not in {"add", "delete", "ask"}:
             action = "add"
+        if action == "ask" and _looks_like_add(text) and not _strong_question_signal(text):
+            action = "add"
+            query = ""
         return {"action": action, "query": query}
 
 
@@ -45,9 +49,65 @@ def _heuristic_intent(text: str) -> Dict[str, str] | None:
     # "отмени" removed to avoid confusion with "отметить" (mark).
     if _contains_any(lowered, ["удали", "удалить", "убери", "стереть", "remove", "delete"]):
         return {"action": "delete", "query": text}
-    if _contains_any(lowered, ["вопрос", "спроси", "узнай", "что ", "как ", "почему", "?"]):
+    if _strong_question_signal(lowered):
         return {"action": "ask", "query": text}
     return None
+
+
+def _strong_question_signal(text: str) -> bool:
+    lowered = text.lower()
+    if "?" in lowered:
+        return True
+    if _contains_any(
+        lowered,
+        [
+            "вопрос",
+            "спроси",
+            "узнай",
+            "покажи",
+            "найди",
+            "сколько",
+            "почему",
+            "зачем",
+            "где",
+            "когда",
+        ],
+    ):
+        return True
+    return bool(
+        re.match(
+            r"^\s*(что|как|когда|где|почему|зачем|сколько|какие|какая|какой|каких|какими|есть ли|можно ли|нужно ли)\b",
+            lowered,
+        )
+    )
+
+
+def _looks_like_add(text: str) -> bool:
+    lowered = text.lower()
+    return _contains_any(
+        lowered,
+        [
+            "задача",
+            "идея",
+            "трат",
+            "расход",
+            "потрат",
+            "купил",
+            "купила",
+            "нужно",
+            "надо",
+            "хочу",
+            "запиши",
+            "добавь",
+            "сохрани",
+            "поставь",
+            "напомни",
+            "отметь",
+            "сделать",
+            "сделай",
+            "создать",
+        ],
+    )
 
 
 def _contains_any(text: str, keywords: list[str]) -> bool:
