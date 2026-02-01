@@ -53,7 +53,7 @@ def create_voice_router(
         temp_path: Optional[str] = None
         transcript = ""
         category = ""
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_str = datetime.now().strftime("%d.%m.%Y")
 
         try:
             logger.info("Скачиваю аудио, длительность=%ss", message.voice.duration)
@@ -205,7 +205,7 @@ def create_voice_router(
         headers = data.get("headers", [])
         row = data.get("row", [])
         transcript = data.get("transcript", "")
-        today_str = data.get("today_str", datetime.now().strftime("%Y-%m-%d"))
+        today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
 
         if not category or not headers or not row:
             await state.clear()

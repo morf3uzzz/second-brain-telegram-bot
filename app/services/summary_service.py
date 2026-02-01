@@ -82,10 +82,12 @@ class SummaryService:
 
 
 def _parse_date(value: str) -> date | None:
-    try:
-        return datetime.strptime(value, "%Y-%m-%d").date()
-    except Exception:
-        return None
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _normalize_bullets(text: str) -> str:

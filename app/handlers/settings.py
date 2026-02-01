@@ -182,6 +182,7 @@ def create_settings_router(
             callback,
             "Отправьте текст инструкции для заполнения таблицы.\n"
             "Обязательные плейсхолдеры: {text}, {headers}\n"
+            "Доступно: {today}\n"
             "Чтобы отменить — нажмите «Отмена».",
             _build_cancel_menu("menu:prompts"),
         )
