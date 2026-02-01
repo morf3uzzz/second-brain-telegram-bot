@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from typing import List
 
 from app.services.openai_service import OpenAIService
@@ -24,18 +25,29 @@ class QAService:
         system_prompt = (
             "Ты помощник поиска по личной базе. "
             "Отвечай кратко и по делу, с опорой на данные. "
-            "НЕ используй Markdown (звездочки, решетки). Пиши просто текст."
+            "НЕ используй Markdown (звездочки, решетки). Пиши просто текст. "
+            "Формат: короткое резюме, затем список 3-7 записей. "
+            "Каждая запись отдельным блоком, поля с новой строки."
         )
 
         for chunk in chunks:
             user_prompt = (
                 f"Вопрос:\n{question}\n\n"
                 f"Данные (фрагмент):\n{chunk}\n\n"
-                "Дай краткий ответ и перечисли 3-7 самых релевантных записей без форматирования."
+                "Дай краткий ответ и перечисли 3-7 самых релевантных записей.\n"
+                "Формат примера:\n"
+                "1. [Лист]\n"
+                "   ДАТА: 01.02.2026\n"
+                "   СУТЬ: ...\n"
+                "\n"
+                "2. [Лист]\n"
+                "   ДАТА: ...\n"
+                "   СУТЬ: ...\n"
+                "Без Markdown."
             )
             answer = await self._openai.chat_text(system_prompt, user_prompt, model=model or self._openai.extract_model)
             if answer:
-                intermediate_answers.append(_strip_markdown(answer))
+                intermediate_answers.append(_format_blocks(_strip_markdown(answer)))
 
         if len(intermediate_answers) == 1:
             return intermediate_answers[0]
@@ -47,7 +59,7 @@ class QAService:
             + "\n\n---\n\n".join(intermediate_answers)
         )
         final_answer = await self._openai.chat_text(system_prompt, final_prompt, model=model or self._openai.extract_model)
-        return _strip_markdown(final_answer)
+        return _format_blocks(_strip_markdown(final_answer))
 
     async def _collect_records(self) -> List[str]:
         exclude = {"settings", "prompts", "inbox", "botsettings"}
@@ -100,3 +112,24 @@ def _strip_markdown(text: str) -> str:
         .replace("`", "")
         .replace("*", "")
     )
+
+
+def _format_blocks(text: str) -> str:
+    lines = text.splitlines()
+    formatted: List[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r"^\d+\.\s", stripped):
+            number, rest = stripped.split(".", 1)
+            rest = rest.strip()
+            parts = [part.strip() for part in rest.split(";") if part.strip()]
+            if parts:
+                formatted.append(f"{number}. {parts[0]}")
+                for part in parts[1:]:
+                    formatted.append(f"   {part}")
+                formatted.append("")
+            else:
+                formatted.append(line)
+        else:
+            formatted.append(line)
+    return "\n".join(formatted).strip()
