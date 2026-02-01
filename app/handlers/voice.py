@@ -55,10 +55,6 @@ class CategoryState(StatesGroup):
     selecting = State()
 
 
-class ThinkingState(StatesGroup):
-    waiting_choice = State()
-
-
 def create_voice_router(
     openai_service: OpenAIService,
     sheets_service: SheetsService,
@@ -127,8 +123,8 @@ def create_voice_router(
             ):
                 await _handle_thinking_mode(
                     status_msg,
-                    state,
                     openai_service,
+                    sheets_service,
                     transcript,
                     today_str,
                     model,
@@ -825,40 +821,6 @@ def create_voice_router(
             f"Категория: {category}"
         )
 
-    @router.callback_query(ThinkingState.waiting_choice, F.data.startswith("thinking:"))
-    async def handle_thinking_choice(callback: CallbackQuery, state: FSMContext) -> None:
-        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
-            await callback.answer("Доступ запрещен", show_alert=True)
-            return
-        await callback.answer()
-        data = await state.get_data()
-        structured = data.get("thinking_structured") or {}
-        transcript = data.get("thinking_transcript") or ""
-        today_str = data.get("thinking_today_str") or datetime.now().strftime("%d.%m.%Y")
-        model = data.get("thinking_model") or None
-
-        action = callback.data.split(":", 1)[1]
-        if action == "cancel":
-            await state.clear()
-            await callback.message.edit_text("Ок, ничего не сохраняю.")
-            return
-
-        if action in {"inbox", "other"}:
-            sheet_name = "Inbox" if action == "inbox" else "Прочее"
-            save_text = _build_thinking_inbox_text(structured, transcript)
-            try:
-                await sheets_service.append_row(sheet_name, [today_str, "Thinking", save_text])
-                await state.clear()
-                await callback.message.edit_text(f"✅ Сохранено в {sheet_name}.")
-            except WorksheetNotFound:
-                await sheets_service.append_row("Inbox", [today_str, "Thinking", save_text])
-                await state.clear()
-                await callback.message.edit_text("⚠️ Лист «Прочее» не найден. Сохранил в Inbox.")
-            return
-
-        await callback.message.edit_text("⚠️ Неизвестное действие.")
-        return
-
     return router
 
 
@@ -1376,15 +1338,6 @@ def _format_thinking_blocks(structured: dict) -> str:
     return "\n".join(parts).strip()
 
 
-def _build_thinking_keyboard() -> InlineKeyboardBuilder:
-    kb = InlineKeyboardBuilder()
-    kb.button(text="📥 В Inbox", callback_data="thinking:inbox")
-    kb.button(text="🗂️ В Прочее", callback_data="thinking:other")
-    kb.button(text="❌ Ничего не сохранять", callback_data="thinking:cancel")
-    kb.adjust(2, 1)
-    return kb
-
-
 def _build_thinking_inbox_text(structured: dict, transcript: str) -> str:
     blocks = _format_thinking_blocks(structured)
     if blocks:
@@ -1394,8 +1347,8 @@ def _build_thinking_inbox_text(structured: dict, transcript: str) -> str:
 
 async def _handle_thinking_mode(
     status_msg: Message,
-    state: FSMContext,
     openai_service: OpenAIService,
+    sheets_service: SheetsService,
     transcript: str,
     today_str: str,
     model: str,
@@ -1419,23 +1372,14 @@ async def _handle_thinking_mode(
         }
 
     text = _format_thinking_blocks(structured) or transcript
-    prompt = (
-        "Я привел твои мысли в порядок.\n"
-        "Вот структура:\n\n"
-        f"{text}\n\n"
-        "Хочешь:\n"
-        "• сохранить в Inbox\n"
-        "• сохранить в Прочее\n"
-        "• ничего не сохранять"
-    )
-    await state.set_state(ThinkingState.waiting_choice)
-    await state.update_data(
-        thinking_structured=structured,
-        thinking_transcript=transcript,
-        thinking_today_str=today_str,
-        thinking_model=model,
-    )
-    await status_msg.edit_text(prompt, reply_markup=_build_thinking_keyboard().as_markup())
+    save_text = _build_thinking_inbox_text(structured, transcript)
+    try:
+        await sheets_service.append_row("Прочее", [today_str, "Thinking", save_text])
+        saved_note = "✅ Сохранил в «Прочее»."
+    except WorksheetNotFound:
+        await sheets_service.append_row("Inbox", [today_str, "Thinking", save_text])
+        saved_note = "⚠️ Лист «Прочее» не найден. Сохранил в Inbox."
+    await status_msg.edit_text(f"{text}\n\n{saved_note}")
 
 
 def _rule_based_items_from_transcript(
