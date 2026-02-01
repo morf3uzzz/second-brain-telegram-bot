@@ -28,12 +28,17 @@ def build_delete_keyboard(candidates: list[DeleteCandidate]) -> InlineKeyboardBu
 
 def format_delete_list(candidates: list[DeleteCandidate]) -> str:
     lines = [
-        f"Найдено записей: {len(candidates)}\n\n"
-        "Выберите запись для удаления (нажмите кнопку с номером):\n"
+        f"Найдено записей: {len(candidates)}",
+        "",
+        "Выберите запись для удаления (нажмите кнопку с номером):",
+        "",
     ]
-    for idx, c in enumerate(candidates, start=1):
-        lines.append(f"{idx}. {c.preview}\n")
-    return "".join(lines)
+    for idx, candidate in enumerate(candidates, start=1):
+        lines.extend(_format_candidate_lines(candidate, index=idx))
+        lines.append("────────")
+    if lines and lines[-1] == "────────":
+        lines.pop()
+    return "\n".join(lines)
 
 
 def _build_confirm_keyboard() -> InlineKeyboardBuilder:
@@ -103,9 +108,10 @@ def create_delete_router(
 
         await state.set_state(DeleteState.confirming)
         await state.update_data(selected_index=index)
+        preview_text = "\n".join(_format_candidate_lines(candidate))
         text = (
             "⚠️ Подтвердите удаление записи:\n\n"
-            f"{candidate.preview}\n\n"
+            f"{preview_text}\n\n"
             "Удалить?"
         )
         await _safe_edit(callback, text, _build_confirm_keyboard())
@@ -187,3 +193,39 @@ def create_delete_router(
         await callback.answer()
 
     return router
+
+
+def _format_candidate_lines(candidate: DeleteCandidate, index: int | None = None) -> list[str]:
+    header = f"🧾 {index}. [{candidate.sheet_name}]" if index else f"🧾 [{candidate.sheet_name}]"
+    lines = [header]
+    for idx, header_name in enumerate(candidate.headers):
+        value = candidate.row_values[idx] if idx < len(candidate.row_values) else ""
+        value = str(value).strip()
+        if not value:
+            continue
+        display = header_name.replace("*", "").strip()
+        emoji = _field_emoji(display)
+        lines.append(f"   {emoji} {display}: {_shorten_value(value)}")
+    return lines
+
+
+def _shorten_value(value: str, max_len: int = 200) -> str:
+    if len(value) <= max_len:
+        return value
+    return value[: max_len - 3] + "..."
+
+
+def _field_emoji(label: str) -> str:
+    key = label.strip().lower()
+    emoji_map = {
+        "дата": "📅",
+        "дата добавления": "📅",
+        "дата выполнения": "⏰",
+        "суть": "📝",
+        "на что потрачено": "🧾",
+        "сумма": "💰",
+        "категория": "🏷️",
+        "приоритет": "⭐️",
+        "сырой текст": "🗣️",
+    }
+    return emoji_map.get(key, "•")
