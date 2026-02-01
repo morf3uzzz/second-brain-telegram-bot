@@ -436,8 +436,15 @@ def _build_summaries_menu(settings) -> InlineKeyboardBuilder:
         text=f"📅 Еженедельные {'✅' if settings.weekly_enabled else '❌'}",
         callback_data="summary:toggle_weekly",
     )
+    
+    weekday_map = {
+        "mon": "Пн", "tue": "Вт", "wed": "Ср", "thu": "Чт",
+        "fri": "Пт", "sat": "Сб", "sun": "Вс"
+    }
+    day_label = weekday_map.get(settings.weekly_day.lower(), settings.weekly_day)
+    
     kb.button(text=f"⏰ Время дня: {settings.daily_time}", callback_data="summary:daily_time")
-    kb.button(text=f"📌 День недели: {settings.weekly_day}", callback_data="summary:weekly_day")
+    kb.button(text=f"📌 День недели: {day_label}", callback_data="summary:weekly_day")
     kb.button(text=f"⏱️ Время недели: {settings.weekly_time}", callback_data="summary:weekly_time")
     kb.button(text="⬅️ Назад", callback_data="menu:main")
     kb.adjust(1)
