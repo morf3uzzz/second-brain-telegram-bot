@@ -2,8 +2,9 @@ import asyncio
 import json
 import logging
 import os
+import re
 import tempfile
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from aiogram import Bot, F, Router
@@ -77,6 +78,7 @@ def create_voice_router(
         transcript = ""
         category = ""
         today_str = datetime.now().strftime("%d.%m.%Y")
+        today_date = datetime.now().date()
 
         try:
             if message.voice.duration > MAX_VOICE_SECONDS:
@@ -209,6 +211,7 @@ def create_voice_router(
                 timeout=60,
             )
             row = _apply_text_fields(headers, row, transcript)
+            row = _apply_date_fields(headers, row, transcript, today_date)
 
             missing_required = _get_missing_required(headers, row)
             if missing_required:
@@ -317,6 +320,10 @@ def create_voice_router(
         row = data.get("row", [])
         transcript = data.get("transcript", "")
         today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
+        today_date = _parse_date_value(today_str) or datetime.now().date()
+        today_date = _parse_date_value(today_str) or datetime.now().date()
+        today_date = _parse_date_value(today_str) or datetime.now().date()
+        today_date = _parse_date_value(today_str) or datetime.now().date()
 
         if not category or not headers or not row:
             await state.clear()
@@ -345,6 +352,7 @@ def create_voice_router(
             return
 
         row = _apply_text_fields(headers, row, transcript)
+        row = _apply_date_fields(headers, row, transcript, today_date)
         await sheets_service.append_row(category, row)
         await sheets_service.append_row("Inbox", [today_str, category, transcript])
         await state.clear()
@@ -436,6 +444,7 @@ def create_voice_router(
             return
 
         row = _apply_text_fields(headers, row, transcript)
+        row = _apply_date_fields(headers, row, transcript, today_date)
         await sheets_service.append_row(category, row)
         await sheets_service.append_row("Inbox", [today_str, category, transcript])
         await state.clear()
@@ -467,6 +476,7 @@ def create_voice_router(
             return
 
         row = _apply_text_fields(headers, row, transcript)
+        row = _apply_date_fields(headers, row, transcript, today_date)
         await sheets_service.append_row(category, row)
         await sheets_service.append_row("Inbox", [today_str, category, transcript])
         await state.clear()
@@ -540,6 +550,7 @@ def create_voice_router(
                 timeout=60,
             )
             row = _apply_text_fields(headers, row, transcript)
+            row = _apply_date_fields(headers, row, transcript, today_date)
 
             missing_required = _get_missing_required(headers, row)
             if missing_required:
@@ -637,6 +648,7 @@ def create_voice_router(
 
         if text.lower() in {"off", "пропустить", "skip"}:
             row = _apply_text_fields(headers, row, transcript)
+            row = _apply_date_fields(headers, row, transcript, today_date)
             await sheets_service.append_row(category, row)
             await sheets_service.append_row("Inbox", [today_str, category, transcript])
             await state.clear()
@@ -695,6 +707,7 @@ def create_voice_router(
             return
 
         row = _apply_text_fields(headers, row, transcript)
+        row = _apply_date_fields(headers, row, transcript, today_date)
         await sheets_service.append_row(category, row)
         await sheets_service.append_row("Inbox", [today_str, category, transcript])
         await state.clear()
@@ -797,6 +810,89 @@ def _apply_text_fields(headers: list[str], row: list[str], transcript: str) -> l
             row[summary_idx] = _make_summary(transcript)
 
     return row
+
+
+def _apply_date_fields(headers: list[str], row: list[str], transcript: str, today: date) -> list[str]:
+    date_explicit = _extract_explicit_date(transcript)
+    date_relative = _extract_relative_date(transcript, today)
+    target_date = date_explicit or date_relative
+
+    today_str = today.strftime("%d.%m.%Y")
+    for idx, header in enumerate(headers):
+        key = _display_header(header).lower().strip()
+        if key == "дата добавления":
+            if idx < len(row):
+                row[idx] = today_str
+
+    if target_date:
+        target_str = target_date.strftime("%d.%m.%Y")
+        for idx, header in enumerate(headers):
+            key = _display_header(header).lower().strip()
+            if key in {"дата выполнения", "дата", "date", "due date"}:
+                if idx < len(row):
+                    row[idx] = target_str
+    return row
+
+
+def _extract_explicit_date(text: str) -> date | None:
+    match = re.search(r"(\d{2}\.\d{2}\.\d{4})", text)
+    if match:
+        return _parse_date_value(match.group(1))
+    match = re.search(r"(\d{4}-\d{2}-\d{2})", text)
+    if match:
+        return _parse_date_value(match.group(1))
+    return None
+
+
+def _extract_relative_date(text: str, today: date) -> date | None:
+    lowered = text.lower()
+    if "послезавтра" in lowered:
+        return today + timedelta(days=2)
+    if "завтра" in lowered:
+        return today + timedelta(days=1)
+    if "сегодня" in lowered:
+        return today
+
+    weekday = _find_weekday(lowered)
+    if weekday is None:
+        return None
+
+    if "следующ" in lowered:
+        days_to_next_monday = (7 - today.weekday()) or 7
+        next_monday = today + timedelta(days=days_to_next_monday)
+        return next_monday + timedelta(days=weekday)
+
+    delta = (weekday - today.weekday()) % 7
+    return today + timedelta(days=delta)
+
+
+def _find_weekday(text: str) -> int | None:
+    mapping = {
+        "понед": 0,
+        "втор": 1,
+        "сред": 2,
+        "четвер": 3,
+        "четверг": 3,
+        "пятниц": 4,
+        "суббот": 5,
+        "воскрес": 6,
+    }
+    for key, idx in mapping.items():
+        if key in text:
+            return idx
+    return None
+
+
+def _parse_date_value(value: str) -> date | None:
+    value = value.strip()
+    if not value:
+        return None
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _get_summary_value(headers: list[str], row: list[str]) -> str:
@@ -1084,6 +1180,7 @@ async def _process_multi_items(
     model: str,
 ) -> None:
     results: list[str] = []
+    today_date = _parse_date_value(today_str) or datetime.now().date()
     for item in items:
         item_text = item.get("text", "")
         category = item.get("category", "")
@@ -1114,6 +1211,7 @@ async def _process_multi_items(
                 model=model,
             )
             row = _apply_text_fields(headers, row, item_text)
+            row = _apply_date_fields(headers, row, item_text, today_date)
 
             duplicate_preview = await _find_duplicate(sheets_service, category, headers, row)
             if duplicate_preview:
