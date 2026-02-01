@@ -1259,6 +1259,63 @@ def _extract_sentence(text: str, keywords: list[str]) -> str:
     return text.strip()
 
 
+def _explicit_items_from_transcript(
+    transcript: str,
+    settings: dict[str, str],
+) -> list[dict[str, str]]:
+    lowered = transcript.lower()
+    task_category = _find_category_by_keywords(settings, ["задач", "task", "todo", "to-do"])
+    idea_category = _find_category_by_keywords(settings, ["иде", "idea"])
+    expense_category = _find_category_by_keywords(settings, ["трат", "расход", "expense", "spend"])
+
+    if not any([task_category, idea_category, expense_category]):
+        return []
+
+    markers = [
+        r"\bтакже\b",
+        r"\bдополнительно\b",
+        r"\bкроме того\b",
+        r"\bа еще\b",
+        r"\bи еще\b",
+        r"\bи у меня\b",
+    ]
+    parts = re.split("|".join(markers), transcript, flags=re.IGNORECASE)
+    parts = [part.strip(" ,.-") for part in parts if part.strip()]
+
+    items: list[dict[str, str]] = []
+    for part in parts:
+        part_lower = part.lower()
+        category = ""
+        if task_category and _contains_keywords(part_lower, ["задач", "задача", "нужно", "надо"]):
+            category = task_category
+        if idea_category and _contains_keywords(part_lower, ["иде", "идея", "хочу", "план", "создать"]):
+            category = idea_category
+        if expense_category and _contains_keywords(part_lower, ["потрат", "заплатил", "купил", "расход", "руб", "доллар"]):
+            category = expense_category
+
+        if not category:
+            continue
+
+        if category == task_category:
+            subtasks = _split_task_part(part)
+            for sub in subtasks:
+                items.append({"category": category, "text": sub})
+        else:
+            items.append({"category": category, "text": part})
+
+    return items
+
+
+def _split_task_part(text: str) -> list[str]:
+    if ":" in text:
+        _, rest = text.split(":", 1)
+        text = rest.strip()
+    parts = [part.strip(" ,.-") for part in text.split(" и ") if part.strip()]
+    if len(parts) <= 1:
+        return [text.strip()]
+    return parts
+
+
 def _expand_item_text(item_text: str, transcript: str, category: str) -> str:
     item_text = item_text.strip() or transcript.strip()
     word_count = len(item_text.split())
@@ -1285,6 +1342,10 @@ async def _split_multi_items(
     settings: dict[str, str],
     model: str,
 ) -> list[dict[str, str]]:
+    explicit_items = _explicit_items_from_transcript(transcript, settings)
+    if len(explicit_items) > 1:
+        return explicit_items
+
     categories_text = "\n".join(
         f"- {name}: {desc}" if desc else f"- {name}"
         for name, desc in settings.items()
