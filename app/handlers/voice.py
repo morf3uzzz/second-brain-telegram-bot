@@ -245,6 +245,7 @@ def create_voice_router(
                     row=row,
                     transcript=transcript,
                     today_str=today_str,
+                    missing_required_indices=[idx for idx, _name in missing_required],
                 )
                 if len(missing_required) == 1 and _is_priority_header(missing_required[0][1]):
                     kb = _build_priority_keyboard()
@@ -342,6 +343,15 @@ def create_voice_router(
         if pending_info:
             pending, _idx, item = pending_info
             results = data.get("multi_results", [])
+            missing_indices = data.get("missing_required_indices", [])
+            row = item.get("row", [])
+            if missing_indices:
+                for idx in missing_indices:
+                    if isinstance(idx, int) and idx < len(row):
+                        row[idx] = ""
+                item["row"] = row
+                pending[_idx] = item
+                await state.update_data(pending_items=pending)
             await _finalize_multi_item(callback.message, callback.message, state, sheets_service, item, results)
             await callback.answer()
             return
@@ -351,6 +361,7 @@ def create_voice_router(
         row = data.get("row", [])
         transcript = data.get("transcript", "")
         today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
+        missing_indices = data.get("missing_required_indices", [])
         today_date = _parse_date_value(today_str) or datetime.now().date()
         today_date = _parse_date_value(today_str) or datetime.now().date()
         today_date = _parse_date_value(today_str) or datetime.now().date()
@@ -361,6 +372,12 @@ def create_voice_router(
             await callback.message.edit_text("⚠️ Не удалось восстановить контекст. Повторите запись.")
             await callback.answer()
             return
+
+        if missing_indices:
+            for idx in missing_indices:
+                if isinstance(idx, int) and idx < len(row):
+                    row[idx] = ""
+            await state.update_data(row=row)
 
         duplicate_preview = await _find_duplicate(sheets_service, category, headers, row)
         if duplicate_preview:
@@ -638,6 +655,7 @@ def create_voice_router(
                     row=row,
                     transcript=transcript,
                     today_str=today_str,
+                    missing_required_indices=[idx for idx, _name in missing_required],
                 )
                 if len(missing_required) == 1 and _is_priority_header(missing_required[0][1]):
                     kb = _build_priority_keyboard()
@@ -1707,6 +1725,7 @@ async def _prompt_required_item(target_msg: Message, state: FSMContext) -> None:
     headers = item.get("headers", [])
     row = item.get("row", [])
     missing_required = _get_missing_required(headers, row)
+    await state.update_data(missing_required_indices=[i for i, _name in missing_required])
     if not missing_required:
         return
     if len(missing_required) == 1 and _is_priority_header(missing_required[0][1]):
