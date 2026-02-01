@@ -354,6 +354,7 @@ def create_voice_router(
         today_date = _parse_date_value(today_str) or datetime.now().date()
         today_date = _parse_date_value(today_str) or datetime.now().date()
         today_date = _parse_date_value(today_str) or datetime.now().date()
+        today_date = _parse_date_value(today_str) or datetime.now().date()
 
         if not category or not headers or not row:
             await state.clear()
