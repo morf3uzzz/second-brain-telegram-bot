@@ -1223,16 +1223,31 @@ def _ensure_expected_categories(
     idea_category = _find_category_by_keywords(settings, ["иде", "idea"])
     expense_category = _find_category_by_keywords(settings, ["трат", "расход", "expense", "spend"])
 
-    if task_category and _contains_keywords(lowered, ["надо", "нужно", "задач", "сделать", "поставить", "видео"]) and not has_category(task_category):
-        text = _extract_sentence(transcript, ["надо", "нужно", "задач", "сделать", "поставить", "видео"])
+    if task_category and _contains_keywords(
+        lowered,
+        ["надо", "нужно", "задач", "сделать", "поставить", "видео", "созвон", "позвон", "встрет"],
+    ) and not has_category(task_category):
+        text = _extract_sentence(
+            transcript,
+            ["надо", "нужно", "задач", "сделать", "поставить", "видео", "созвон", "позвон", "встрет"],
+        )
         result.append({"category": task_category, "text": text})
 
-    if idea_category and _contains_keywords(lowered, ["иде", "idea", "хочу сделать", "план"]) and not has_category(idea_category):
-        text = _extract_sentence(transcript, ["иде", "idea", "хочу сделать", "план"])
+    if idea_category and _contains_keywords(
+        lowered,
+        ["иде", "идея", "idea", "мечта", "хочу", "план", "создать"],
+    ) and not has_category(idea_category):
+        text = _extract_sentence(transcript, ["иде", "идея", "idea", "мечта", "хочу", "план", "создать"])
         result.append({"category": idea_category, "text": text})
 
-    if expense_category and _contains_keywords(lowered, ["потрат", "заплатил", "купил", "расход", "expense", "spend"]) and not has_category(expense_category):
-        text = _extract_sentence(transcript, ["потрат", "заплатил", "купил", "расход", "expense", "spend"])
+    if expense_category and _contains_keywords(
+        lowered,
+        ["потрат", "заплатил", "купил", "расход", "expense", "spend", "руб", "рубл", "доллар", "магазин"],
+    ) and not has_category(expense_category):
+        text = _extract_sentence(
+            transcript,
+            ["потрат", "заплатил", "купил", "расход", "expense", "spend", "руб", "рубл", "доллар", "магазин"],
+        )
         result.append({"category": expense_category, "text": text})
 
     return result
