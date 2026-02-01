@@ -170,7 +170,9 @@ def create_voice_router(
                     "Напишите ответ так:\n"
                     "Поле=значение; Поле=значение\n"
                     "Пример: Приоритет=Высокий\n\n"
-                    "Чтобы отменить — напишите «Отмена»."
+                    "Чтобы пропустить — нажмите «Пропустить» или скажите «off».\n"
+                    "Чтобы отменить — напишите «Отмена».",
+                    reply_markup=_build_required_keyboard().as_markup(),
                 )
                 return
 
@@ -216,6 +218,36 @@ def create_voice_router(
             return
         await state.clear()
         await callback.message.edit_text("Ок, отменил.")
+        await callback.answer()
+
+    @router.callback_query(IntakeState.waiting_required, F.data == "req:skip")
+    async def skip_required(callback: CallbackQuery, state: FSMContext) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+
+        data = await state.get_data()
+        category = data.get("category", "")
+        headers = data.get("headers", [])
+        row = data.get("row", [])
+        transcript = data.get("transcript", "")
+        today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
+
+        if not category or not headers or not row:
+            await state.clear()
+            await callback.message.edit_text("⚠️ Не удалось восстановить контекст. Повторите запись.")
+            await callback.answer()
+            return
+
+        await sheets_service.append_row(category, row)
+        await sheets_service.append_row("Inbox", [today_str, category, transcript])
+        await state.clear()
+        short_text = transcript if len(transcript) <= 300 else transcript[:297] + "..."
+        await callback.message.edit_text(
+            f"✅ Сохранено в '{category}' без обязательных полей.\n"
+            f"Суть: {short_text}\n"
+            f"Категория: {category}"
+        )
         await callback.answer()
 
     @router.callback_query(IntakeState.waiting_required, F.data.startswith("req:priority:"))
@@ -269,7 +301,9 @@ def create_voice_router(
                 f"{missing_names}\n\n"
                 "Напишите ответ так:\n"
                 "Поле=значение; Поле=значение\n"
-                "Пример: Приоритет=Высокий"
+                "Пример: Приоритет=Высокий\n"
+                "Можно нажать «Пропустить».",
+                reply_markup=_build_required_keyboard().as_markup(),
             )
             await callback.answer()
             return
@@ -295,6 +329,17 @@ def create_voice_router(
         if text.lower() in {"отмена", "cancel", "стоп"}:
             await state.clear()
             await message.answer("Ок, отменил.")
+            return
+        if text.lower() in {"off", "пропустить", "skip"}:
+            await sheets_service.append_row(category, row)
+            await sheets_service.append_row("Inbox", [today_str, category, transcript])
+            await state.clear()
+            short_text = transcript if len(transcript) <= 300 else transcript[:297] + "..."
+            await message.answer(
+                f"✅ Сохранено в '{category}' без обязательных полей.\n"
+                f"Суть: {short_text}\n"
+                f"Категория: {category}"
+            )
             return
 
         data = await state.get_data()
@@ -329,7 +374,8 @@ def create_voice_router(
                 f"{missing_names}\n\n"
                 "Напишите ответ так:\n"
                 "Поле=значение; Поле=значение\n"
-                "Пример: Приоритет=Высокий"
+                "Пример: Приоритет=Высокий\n"
+                "Можно написать «off» или «Пропустить»."
             )
             await state.update_data(row=row)
             return
@@ -422,6 +468,15 @@ def _build_priority_keyboard() -> InlineKeyboardBuilder:
     kb.button(text="Низкий", callback_data="req:priority:low")
     kb.button(text="Средний", callback_data="req:priority:medium")
     kb.button(text="Высокий", callback_data="req:priority:high")
+    kb.button(text="Пропустить", callback_data="req:skip")
     kb.button(text="Отмена", callback_data="req:cancel")
-    kb.adjust(3, 1)
+    kb.adjust(3, 1, 1)
+    return kb
+
+
+def _build_required_keyboard() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Пропустить", callback_data="req:skip")
+    kb.button(text="Отмена", callback_data="req:cancel")
+    kb.adjust(2)
     return kb
