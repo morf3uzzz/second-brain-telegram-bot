@@ -19,6 +19,7 @@ class BotSettings:
     summary_chat_id: Optional[int] = None
     last_daily_sent: str = ""
     last_weekly_sent: str = ""
+    openai_model: str = "gpt-4o"
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "BotSettings":
@@ -32,6 +33,7 @@ class BotSettings:
             summary_chat_id=data.get("summary_chat_id"),
             last_daily_sent=str(data.get("last_daily_sent", "")),
             last_weekly_sent=str(data.get("last_weekly_sent", "")),
+            openai_model=str(data.get("openai_model", "gpt-4o")),
         )
 
 

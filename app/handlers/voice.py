@@ -14,6 +14,7 @@ from gspread.exceptions import WorksheetNotFound
 
 from app.prompts import DEFAULT_EXTRACT_USER, DEFAULT_ROUTER_USER, EXTRACT_PROMPT_KEY, ROUTER_PROMPT_KEY
 from app.handlers.delete import DeleteState, build_delete_keyboard, format_delete_list
+from app.services.bot_settings_service import BotSettingsService
 from app.services.delete_service import DeleteService
 from app.services.intent_service import IntentService
 from app.services.openai_service import OpenAIService
@@ -34,6 +35,7 @@ def create_voice_router(
     sheets_service: SheetsService,
     router_service: RouterService,
     intent_service: IntentService,
+    settings_service: BotSettingsService,
     qa_service: QAService,
     delete_service: DeleteService,
     allowed_user_ids: list[int],
@@ -109,14 +111,18 @@ def create_voice_router(
             settings = await sheets_service.load_settings()
             logger.info("Категорий найдено: %s", len(settings))
 
+            logger.info("Читаю настройки бота")
+            bot_settings = await settings_service.load()
+            model = bot_settings.openai_model
+
             logger.info("Читаю Prompts из Google Sheets")
             prompts = await sheets_service.get_prompts()
             router_prompt = prompts.get(ROUTER_PROMPT_KEY, DEFAULT_ROUTER_USER)
             extract_prompt = prompts.get(EXTRACT_PROMPT_KEY, DEFAULT_EXTRACT_USER)
 
-            logger.info("Классифицирую категорию")
+            logger.info("Классифицирую категорию (model=%s)", model)
             category, _reasoning = await asyncio.wait_for(
-                router_service.classify_category(transcript, settings, router_prompt),
+                router_service.classify_category(transcript, settings, router_prompt, model=model),
                 timeout=60,
             )
             logger.info("Определил категорию: %s", category)
@@ -127,10 +133,10 @@ def create_voice_router(
                 raise ValueError("No headers found in target sheet")
             logger.info("Нашел столбцы: %s", headers)
 
-            logger.info("Извлекаю данные под заголовки")
+            logger.info("Извлекаю данные под заголовки (model=%s)", model)
             clean_headers = [_clean_header(header) for header in headers]
             row = await asyncio.wait_for(
-                router_service.extract_row(transcript, clean_headers, today_str, extract_prompt),
+                router_service.extract_row(transcript, clean_headers, today_str, extract_prompt, model=model),
                 timeout=60,
             )
 

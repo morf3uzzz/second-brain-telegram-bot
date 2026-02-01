@@ -21,6 +21,7 @@ class RouterService:
         settings: Dict[str, str],
         user_prompt_template: str,
         system_prompt: str = DEFAULT_ROUTER_SYSTEM,
+        model: str | None = None,
     ) -> Tuple[str, str]:
         categories_text = "\n".join(
             f"- {name}: {desc}" if desc else f"- {name}"
@@ -33,7 +34,7 @@ class RouterService:
         data = await self._openai.chat_json(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            model=self._openai.router_model,
+            model=model or self._openai.router_model,
         )
 
         raw_category = str(data.get("category", "")).strip()
@@ -55,6 +56,7 @@ class RouterService:
         today_str: str,
         user_prompt_template: str,
         system_prompt: str = DEFAULT_EXTRACT_SYSTEM,
+        model: str | None = None,
     ) -> List[str]:
         user_prompt = user_prompt_template.format(
             text=text,
@@ -64,7 +66,7 @@ class RouterService:
         data = await self._openai.chat_json(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            model=self._openai.extract_model,
+            model=model or self._openai.extract_model,
         )
 
         normalized_headers = {self._normalize(h): h for h in headers}

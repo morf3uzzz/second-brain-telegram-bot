@@ -58,6 +58,7 @@ async def main() -> None:
             sheets_service,
             router_service,
             intent_service,
+            settings_service,
             qa_service,
             delete_service,
             allowed_user_ids=config.allowed_user_ids,

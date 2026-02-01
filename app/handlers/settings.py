@@ -50,6 +50,7 @@ def create_settings_router(
             "⚙️ Меню настроек.\n\n"
             "Здесь можно настроить:\n"
             "🧠 Инструкции — как бот понимает ваши данные.\n"
+            "🤖 Модель ИИ — баланс цены и качества.\n"
             "📊 Сводки — когда и как присылать отчёты.\n"
             "🕒 Таймзона — чтобы время совпадало с вашим.\n\n"
             "Выберите нужный раздел 👇"
@@ -68,11 +69,42 @@ def create_settings_router(
             "⚙️ Меню настроек.\n\n"
             "Здесь можно настроить:\n"
             "🧠 Инструкции — как бот понимает ваши данные.\n"
+            "🤖 Модель ИИ — баланс цены и качества.\n"
             "📊 Сводки — когда и как присылать отчёты.\n"
             "🕒 Таймзона — чтобы время совпадало с вашим.\n\n"
             "Выберите нужный раздел 👇"
         )
         await _show_menu(callback, text, kb)
+        await callback.answer()
+
+    @router.callback_query(F.data == "menu:models")
+    async def show_models_menu(callback: CallbackQuery, state: FSMContext) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        await state.clear()
+        settings = await settings_service.load()
+        kb = _build_models_menu(settings.openai_model)
+        await _show_menu(
+            callback,
+            "🤖 Выберите модель ИИ.\n\n"
+            "Цены указаны за 1М токенов (Вход / Выход).\n"
+            "Вход — это ваше сообщение + контекст.\n"
+            "Выход — ответ нейросети.",
+            kb,
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("model:set:"))
+    async def set_model(callback: CallbackQuery) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        model = callback.data.split(":", 2)[2]
+        await settings_service.update({"openai_model": model})
+        settings = await settings_service.load()
+        kb = _build_models_menu(settings.openai_model)
+        await _show_menu(callback, f"✅ Модель изменена на {model}.", kb)
         await callback.answer()
 
     @router.callback_query(F.data == "menu:prompts")
@@ -416,11 +448,28 @@ def _missing_placeholders(key: str, text: str) -> list[str]:
 def _build_main_menu(settings) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="🧠 Инструкции", callback_data="menu:prompts")
+    kb.button(text="🤖 Модель ИИ", callback_data="menu:models")
     kb.button(text="📊 Сводки", callback_data="menu:summaries")
     kb.button(text=f"🕒 Таймзона: {settings.timezone}", callback_data="menu:timezone")
     kb.button(text="❓ Помощь", callback_data="menu:help")
     kb.button(text="⬅️ Назад", callback_data="menu:start")
-    kb.adjust(2, 2, 1)
+    kb.adjust(2, 2, 2)
+    return kb
+
+
+def _build_models_menu(current: str) -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    models = [
+        ("gpt-4o", "GPT-4o (Умная)", "$2.5/$10"),
+        ("gpt-4o-mini", "GPT-4o Mini (Быстрая)", "$0.15/$0.6"),
+        ("o1-mini", "o1 Mini (Рассуждающая)", "$3/$12"),
+    ]
+    for model, label, price in models:
+        prefix = "✅ " if model == current else ""
+        text = f"{prefix}{label} — {price}"
+        kb.button(text=text, callback_data=f"model:set:{model}")
+    kb.button(text="⬅️ Назад", callback_data="menu:main")
+    kb.adjust(1)
     return kb
 
 
