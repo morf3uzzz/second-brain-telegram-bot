@@ -1207,6 +1207,57 @@ def _safe_format(template: str, mapping: dict[str, str]) -> str:
     return result
 
 
+def _ensure_expected_categories(
+    transcript: str,
+    settings: dict[str, str],
+    items: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    lowered = transcript.lower()
+    result = list(items)
+
+    def has_category(cat_name: str) -> bool:
+        return any(item.get("category") == cat_name for item in result)
+
+    task_category = _find_category_by_keywords(settings, ["задач", "task", "todo", "to-do"])
+    idea_category = _find_category_by_keywords(settings, ["иде", "idea"])
+    expense_category = _find_category_by_keywords(settings, ["трат", "расход", "expense", "spend"])
+
+    if task_category and _contains_keywords(lowered, ["надо", "нужно", "задач", "сделать", "поставить", "видео"]) and not has_category(task_category):
+        text = _extract_sentence(transcript, ["надо", "нужно", "задач", "сделать", "поставить", "видео"])
+        result.append({"category": task_category, "text": text})
+
+    if idea_category and _contains_keywords(lowered, ["иде", "idea", "хочу сделать", "план"]) and not has_category(idea_category):
+        text = _extract_sentence(transcript, ["иде", "idea", "хочу сделать", "план"])
+        result.append({"category": idea_category, "text": text})
+
+    if expense_category and _contains_keywords(lowered, ["потрат", "заплатил", "купил", "расход", "expense", "spend"]) and not has_category(expense_category):
+        text = _extract_sentence(transcript, ["потрат", "заплатил", "купил", "расход", "expense", "spend"])
+        result.append({"category": expense_category, "text": text})
+
+    return result
+
+
+def _find_category_by_keywords(settings: dict[str, str], keywords: list[str]) -> str | None:
+    for name in settings.keys():
+        lowered = name.strip().lower()
+        if any(keyword in lowered for keyword in keywords):
+            return name
+    return None
+
+
+def _contains_keywords(text: str, keywords: list[str]) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
+def _extract_sentence(text: str, keywords: list[str]) -> str:
+    parts = re.split(r"[.!?]\s+|\n", text)
+    for part in parts:
+        lowered = part.lower()
+        if any(keyword in lowered for keyword in keywords):
+            return part.strip()
+    return text.strip()
+
+
 async def _split_multi_items(
     openai_service: OpenAIService,
     transcript: str,
@@ -1248,7 +1299,7 @@ async def _split_multi_items(
         if not canonical:
             canonical = ""
         result.append({"category": canonical, "text": text})
-    return result
+    return _ensure_expected_categories(transcript, settings, result)
 
 
 async def _process_multi_items(
