@@ -1328,11 +1328,16 @@ def _split_sentences(text: str) -> list[str]:
 def _split_clauses(text: str) -> list[str]:
     markers = [
         r"\bтакже\b",
+        r"\bтакже я\b",
+        r"\bтак же\b",
         r"\bдополнительно\b",
         r"\bкроме того\b",
         r"\bа еще\b",
         r"\bи еще\b",
         r"\bи у меня\b",
+        r"\bи я\b",
+        r"\bи также\b",
+        r"\bплюс\b",
     ]
     parts = re.split("|".join(markers), text, flags=re.IGNORECASE)
     return [part.strip(" ,.-") for part in parts if part.strip()]
