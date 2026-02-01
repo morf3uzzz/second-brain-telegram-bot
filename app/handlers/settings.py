@@ -51,6 +51,7 @@ def create_settings_router(
             "Здесь можно настроить:\n"
             "🧠 Инструкции — как бот понимает ваши данные.\n"
             "🤖 Модель ИИ — баланс цены и качества.\n"
+            "🛡 Безопасный вывод — защита от слишком длинных сообщений.\n"
             "📊 Сводки — когда и как присылать отчёты.\n"
             "🕒 Таймзона — чтобы время совпадало с вашим.\n\n"
             "Выберите нужный раздел 👇"
@@ -70,11 +71,24 @@ def create_settings_router(
             "Здесь можно настроить:\n"
             "🧠 Инструкции — как бот понимает ваши данные.\n"
             "🤖 Модель ИИ — баланс цены и качества.\n"
+            "🛡 Безопасный вывод — защита от слишком длинных сообщений.\n"
             "📊 Сводки — когда и как присылать отчёты.\n"
             "🕒 Таймзона — чтобы время совпадало с вашим.\n\n"
             "Выберите нужный раздел 👇"
         )
         await _show_menu(callback, text, kb)
+        await callback.answer()
+
+    @router.callback_query(F.data == "output:toggle_safe")
+    async def toggle_safe_output(callback: CallbackQuery) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        settings = await settings_service.load()
+        await settings_service.update({"safe_output": not settings.safe_output})
+        settings = await settings_service.load()
+        kb = _build_main_menu(settings)
+        await _show_menu(callback, "✅ Настройки безопасного вывода обновлены.", kb)
         await callback.answer()
 
     @router.callback_query(F.data == "menu:models")
@@ -449,11 +463,12 @@ def _build_main_menu(settings) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="🧠 Инструкции", callback_data="menu:prompts")
     kb.button(text="🤖 Модель ИИ", callback_data="menu:models")
+    kb.button(text=f"🛡 Безопасный вывод {'✅' if settings.safe_output else '❌'}", callback_data="output:toggle_safe")
     kb.button(text="📊 Сводки", callback_data="menu:summaries")
     kb.button(text=f"🕒 Таймзона: {settings.timezone}", callback_data="menu:timezone")
     kb.button(text="❓ Помощь", callback_data="menu:help")
     kb.button(text="⬅️ Назад", callback_data="menu:start")
-    kb.adjust(2, 2, 2)
+    kb.adjust(2, 2, 2, 1)
     return kb
 
 

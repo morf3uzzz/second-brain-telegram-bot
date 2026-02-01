@@ -110,7 +110,7 @@ def create_voice_router(
                 logger.info("Режим вопроса")
                 await status_msg.edit_text("⏳ Ищу по базе, это может занять до минуты.")
                 answer = await qa_service.answer_question(query or transcript, model=model)
-                await _send_long_text(status_msg, message, answer)
+                await _send_long_text(status_msg, message, answer, safe_mode=bot_settings.safe_output)
                 return
 
             if action == "delete":
@@ -820,10 +820,21 @@ def _build_duplicate_keyboard() -> InlineKeyboardBuilder:
     return kb
 
 
-async def _send_long_text(status_msg: Message, message: Message, text: str) -> None:
+async def _send_long_text(
+    status_msg: Message,
+    message: Message,
+    text: str,
+    safe_mode: bool = True,
+) -> None:
     chunks = _split_text(text, MAX_TG_CHARS)
     if not chunks:
         return
+    if safe_mode and len(chunks) > 3:
+        chunks = chunks[:3]
+        chunks[-1] = (
+            chunks[-1]
+            + "\n\n…Слишком много результатов. Уточните запрос."
+        )
     try:
         await status_msg.edit_text(chunks[0])
     except Exception:
