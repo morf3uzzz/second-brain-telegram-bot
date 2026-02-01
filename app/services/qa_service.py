@@ -13,7 +13,7 @@ class QAService:
         self._openai = openai_service
         self._sheets = sheets_service
 
-    async def answer_question(self, question: str) -> str:
+    async def answer_question(self, question: str, model: str | None = None) -> str:
         records = await self._collect_records()
         if not records:
             return "В базе пока нет данных для поиска."
@@ -23,18 +23,19 @@ class QAService:
 
         system_prompt = (
             "Ты помощник поиска по личной базе. "
-            "Отвечай кратко и по делу, с опорой на данные."
+            "Отвечай кратко и по делу, с опорой на данные. "
+            "НЕ используй Markdown (звездочки, решетки). Пиши просто текст."
         )
 
         for chunk in chunks:
             user_prompt = (
                 f"Вопрос:\n{question}\n\n"
                 f"Данные (фрагмент):\n{chunk}\n\n"
-                "Дай краткий ответ и перечисли 3-7 самых релевантных записей."
+                "Дай краткий ответ и перечисли 3-7 самых релевантных записей без форматирования."
             )
-            answer = await self._openai.chat_text(system_prompt, user_prompt, model=self._openai.extract_model)
+            answer = await self._openai.chat_text(system_prompt, user_prompt, model=model or self._openai.extract_model)
             if answer:
-                intermediate_answers.append(answer)
+                intermediate_answers.append(_strip_markdown(answer))
 
         if len(intermediate_answers) == 1:
             return intermediate_answers[0]
@@ -42,10 +43,11 @@ class QAService:
         final_prompt = (
             f"Вопрос:\n{question}\n\n"
             "Собери единый ответ на основе промежуточных результатов ниже. "
-            "Сделай короткое резюме и перечисли релевантные записи:\n\n"
+            "Сделай короткое резюме и перечисли релевантные записи без Markdown:\n\n"
             + "\n\n---\n\n".join(intermediate_answers)
         )
-        return await self._openai.chat_text(system_prompt, final_prompt, model=self._openai.extract_model)
+        final_answer = await self._openai.chat_text(system_prompt, final_prompt, model=model or self._openai.extract_model)
+        return _strip_markdown(final_answer)
 
     async def _collect_records(self) -> List[str]:
         exclude = {"settings", "prompts", "inbox", "botsettings"}
@@ -89,3 +91,12 @@ def _chunk_records(records: List[str], max_chars: int) -> List[str]:
     if current:
         chunks.append("\n".join(current))
     return chunks
+
+
+def _strip_markdown(text: str) -> str:
+    return (
+        text.replace("**", "")
+        .replace("__", "")
+        .replace("`", "")
+        .replace("*", "")
+    )

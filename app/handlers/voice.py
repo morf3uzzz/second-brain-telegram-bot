@@ -51,7 +51,7 @@ def create_voice_router(
             return
 
         logger.info("Получил аудио")
-        await message.answer("⏳ Обрабатываю сообщение, это может занять до минуты.")
+        status_msg = await message.answer("⏳ Обрабатываю сообщение, это может занять до минуты.")
         temp_path: Optional[str] = None
         transcript = ""
         category = ""
@@ -82,16 +82,16 @@ def create_voice_router(
 
             if action == "ask":
                 logger.info("Режим вопроса")
-                await message.answer("⏳ Ищу по базе, это может занять до минуты.")
-                answer = await qa_service.answer_question(query or transcript)
-                await message.answer(answer)
+                await status_msg.edit_text("⏳ Ищу по базе, это может занять до минуты.")
+                answer = await qa_service.answer_question(query or transcript, model=model)
+                await status_msg.edit_text(answer)
                 return
 
             if action == "delete":
                 logger.info("Режим удаления")
                 candidates = await delete_service.find_candidates(query or transcript, limit=7)
                 if not candidates:
-                    await message.answer("⚠️ Не нашел записей для удаления.")
+                    await status_msg.edit_text("⚠️ Не нашел записей для удаления.")
                     return
                 await state.set_state(DeleteState.selecting)
                 await state.update_data(
@@ -108,7 +108,7 @@ def create_voice_router(
                 )
                 kb = build_delete_keyboard(candidates)
                 text = format_delete_list(candidates)
-                await message.answer(text, reply_markup=kb.as_markup())
+                await status_msg.edit_text(text, reply_markup=kb.as_markup())
                 return
 
             logger.info("Читаю Settings из Google Sheets")
@@ -155,7 +155,7 @@ def create_voice_router(
                     today_str=today_str,
                 )
                 missing_names = ", ".join(name for _idx, name in missing_required)
-                await message.answer(
+                await status_msg.edit_text(
                     "Нужны уточнения по обязательным полям: "
                     f"{missing_names}.\n"
                     "Ответьте в формате: Поле=значение; Поле=значение\n"
@@ -170,26 +170,26 @@ def create_voice_router(
             logger.info("Записал строку")
 
             short_text = transcript if len(transcript) <= 300 else transcript[:297] + "..."
-            await message.answer(
+            await status_msg.edit_text(
                 f"✅ Сохранено в '{category}'.\n"
                 f"Суть: {short_text}\n"
                 f"Категория: {category}"
             )
         except json.JSONDecodeError:
             logger.exception("GPT returned invalid JSON")
-            await message.answer("⚠️ GPT вернул некорректный JSON. Попробуйте еще раз.")
+            await status_msg.edit_text("⚠️ GPT вернул некорректный JSON. Попробуйте еще раз.")
             await _safe_inbox(sheets_service, today_str, category or "Unknown", transcript)
         except asyncio.TimeoutError:
             logger.exception("Timeout while processing message")
-            await message.answer("⚠️ Превышено время ожидания ответа от ИИ. Попробуйте еще раз.")
+            await status_msg.edit_text("⚠️ Превышено время ожидания ответа от ИИ. Попробуйте еще раз.")
             await _safe_inbox(sheets_service, today_str, category or "Unknown", transcript)
         except WorksheetNotFound:
             logger.exception("Worksheet not found")
-            await message.answer("⚠️ Не найден лист в Google Sheets. Проверьте название категории.")
+            await status_msg.edit_text("⚠️ Не найден лист в Google Sheets. Проверьте название категории.")
             await _safe_inbox(sheets_service, today_str, category or "Unknown", transcript)
         except Exception:
             logger.exception("Unhandled error")
-            await message.answer("⚠️ Ошибка обработки сообщения. Попробуйте еще раз.")
+            await status_msg.edit_text("⚠️ Ошибка обработки сообщения. Попробуйте еще раз.")
             await _safe_inbox(sheets_service, today_str, category or "Unknown", transcript)
         finally:
             if temp_path:
