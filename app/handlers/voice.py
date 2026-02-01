@@ -844,7 +844,7 @@ def create_voice_router(
             return
 
         if action in {"inbox", "other"}:
-            sheet_name = "Inbox" if action == "inbox" else "Other"
+            sheet_name = "Inbox" if action == "inbox" else "Прочее"
             save_text = _build_thinking_inbox_text(structured, transcript)
             try:
                 await sheets_service.append_row(sheet_name, [today_str, "Thinking", save_text])
@@ -853,7 +853,7 @@ def create_voice_router(
             except WorksheetNotFound:
                 await sheets_service.append_row("Inbox", [today_str, "Thinking", save_text])
                 await state.clear()
-                await callback.message.edit_text("⚠️ Лист Other не найден. Сохранил в Inbox.")
+                await callback.message.edit_text("⚠️ Лист «Прочее» не найден. Сохранил в Inbox.")
             return
 
         await callback.message.edit_text("⚠️ Неизвестное действие.")
@@ -1379,7 +1379,7 @@ def _format_thinking_blocks(structured: dict) -> str:
 def _build_thinking_keyboard() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="📥 В Inbox", callback_data="thinking:inbox")
-    kb.button(text="🗂️ В Other", callback_data="thinking:other")
+    kb.button(text="🗂️ В Прочее", callback_data="thinking:other")
     kb.button(text="❌ Ничего не сохранять", callback_data="thinking:cancel")
     kb.adjust(2, 1)
     return kb
@@ -1425,7 +1425,7 @@ async def _handle_thinking_mode(
         f"{text}\n\n"
         "Хочешь:\n"
         "• сохранить в Inbox\n"
-        "• сохранить в Other\n"
+        "• сохранить в Прочее\n"
         "• ничего не сохранять"
     )
     await state.set_state(ThinkingState.waiting_choice)

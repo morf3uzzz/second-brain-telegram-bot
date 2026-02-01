@@ -10,7 +10,7 @@
 
 - **Голос → таблица**: отправьте голосовое — бот расшифрует, выберет категорию из Settings, заполнит строку по заголовкам листа и запишет в целевой лист и Inbox.
 - **Намерение из голоса**: для коротких сообщений бот сам понимает, хотите ли вы **добавить** запись, **задать вопрос** по данным или **удалить** запись — кнопки не нужны.
-- **Thinking‑mode для длинных голосовых**: если сообщение длиннее 2 минут, бот **не пишет в таблицы автоматически** — он структурирует мысли и предлагает сохранить **в Inbox** или **в Other** (или ничего не сохранять).
+- **Thinking‑mode для длинных голосовых**: если сообщение длиннее 2 минут, бот **не пишет в таблицы автоматически** — он структурирует мысли и предлагает сохранить **в Inbox** или **в Прочее** (или ничего не сохранять).
 - **Поиск**: задайте вопрос голосом — бот ответит на основе всех листов категорий.
 - **Удаление**: скажите, что нужно удалить — бот найдёт кандидатов, вы выберете запись; удаление идёт из листа категории и из Inbox.
 - **Обязательные поля**: в заголовке колонки поставьте `*` (например `Приоритет*`); если значение пустое, бот спросит уточнение одним сообщением (формат: `Поле=значение; Поле=значение` или просто значение для одного поля).
@@ -30,7 +30,7 @@
 2. **Листы:**
    - **Settings**: колонка A — категория (название листа), колонка B — описание для роутера.
    - **Inbox**: копия каждой заметки (Дата, Категория, Текст). Создаётся/используется ботом.
-   - **Other**: свалка для длинных голосовых из Thinking‑mode (рекомендуется).
+   - **Прочее**: свалка для длинных голосовых из Thinking‑mode (рекомендуется).
    - **Prompts** (необязательно): ключ / значение для своих промптов. Создаётся при сохранении промпта из `/settings`.
    - По одному листу на категорию (название как в Settings, колонка A). Первая строка — заголовки. Для обязательных колонок добавьте `*` (например `Приоритет*`).
 
@@ -78,7 +78,7 @@ bash setup.sh
 ### Использование
 
 - **Добавить запись**: отправьте голосовое — бот добавит в нужный лист и Inbox.
-- **Длинное голосовое (>2 мин)**: бот сначала структурирует мысли и предложит сохранить в Inbox / Other или не сохранять.
+- **Длинное голосовое (>2 мин)**: бот сначала структурирует мысли и предложит сохранить в Inbox / Прочее или не сохранять.
 - **Вопрос**: отправьте голосовое с вопросом — бот ответит по вашим таблицам.
 - **Удалить**: скажите, например, «удали задачу про X» — выберите из списка; строка удалится из листа и Inbox.
 - **Настройки**: команда `/settings` — промпты, чат для сводок, время и таймзона ежедневных/еженедельных сводок.
@@ -97,7 +97,7 @@ A productivity Telegram bot that turns voice messages into structured notes in G
 
 - **Voice → Sheet**: Send a voice message; the bot transcribes it, picks a category from your Settings, fills the row by sheet headers, and writes to the target sheet + Inbox.
 - **Intent from voice**: For short messages, the bot infers whether you want to **add**, **ask**, or **delete**—no buttons required.
-- **Thinking mode for long voice**: If a message is longer than 2 minutes, the bot **does not write to tables automatically**. It structures your thoughts and asks whether to save to **Inbox** or **Other** (or save nothing).
+- **Thinking mode for long voice**: If a message is longer than 2 minutes, the bot **does not write to tables automatically**. It structures your thoughts and asks whether to save to **Inbox** or **Прочее** (or save nothing).
 - **Search**: Ask questions in voice; the bot answers using data from all category sheets.
 - **Delete**: Say you want to remove something; the bot finds candidates and lets you pick one to delete (from both the category sheet and Inbox).
 - **Required fields**: Mark columns with `*` in the header (e.g. `Приоритет*`); if empty, the bot asks for values in one round (e.g. `Поле=значение; Поле=значение` or just the value for a single field).
@@ -117,7 +117,7 @@ A productivity Telegram bot that turns voice messages into structured notes in G
 2. **Sheets:**
    - **Settings**: Col A = Category (sheet name), Col B = Description (for the router).
    - **Inbox**: Backup of every note (Date, Category, Transcript). Created/used by the bot.
-   - **Other**: Catch‑all for long voice messages from Thinking mode (recommended).
+   - **Прочее**: Catch‑all for long voice messages from Thinking mode (recommended).
    - **Prompts** (optional): Key / Value for custom prompts. The bot can create it when you save a prompt from `/settings`.
    - One sheet per category (same name as in Settings Col A), first row = column headers. Use `*` for required columns (e.g. `Приоритет*`).
 
@@ -165,7 +165,7 @@ bash setup.sh
 ### Usage
 
 - **Add a note**: Send a voice message; the bot adds it to the right sheet and Inbox.
-- **Long voice (>2 min)**: The bot structures the thoughts first, then asks to save to Inbox / Other or skip.
+- **Long voice (>2 min)**: The bot structures the thoughts first, then asks to save to Inbox / Прочее or skip.
 - **Ask**: Send a voice message that is a question; the bot answers from your sheets.
 - **Delete**: Say something like “удали задачу про X”; choose from the list, then the row is removed from the sheet and Inbox.
 - **Settings**: Send `/settings` to configure prompts, summary chat, daily/weekly time and timezone.
