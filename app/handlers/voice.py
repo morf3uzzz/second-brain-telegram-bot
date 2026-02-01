@@ -1313,9 +1313,9 @@ def _rule_based_items_from_transcript(
             if category == task_category:
                 subtasks = _split_task_part(part)
                 for sub in subtasks:
-                items.append({"category": category, "text": sub, "source": "rule"})
+                    items.append({"category": category, "text": sub, "source": "rule"})
             else:
-            items.append({"category": category, "text": part.strip(), "source": "rule"})
+                items.append({"category": category, "text": part.strip(), "source": "rule"})
 
     return items
 
