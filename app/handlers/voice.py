@@ -26,6 +26,10 @@ from app.utils.auth import is_allowed, user_label
 
 logger = logging.getLogger(__name__)
 
+MAX_VOICE_SECONDS = 12 * 60
+LONG_VOICE_SECONDS = 6 * 60
+MAX_TRANSCRIBE_TIMEOUT = 900
+
 
 class IntakeState(StatesGroup):
     waiting_required = State()
@@ -59,6 +63,21 @@ def create_voice_router(
         today_str = datetime.now().strftime("%d.%m.%Y")
 
         try:
+            if message.voice.duration > MAX_VOICE_SECONDS:
+                await status_msg.edit_text(
+                    "⚠️ Сообщение слишком длинное. "
+                    "Максимум — 12 минут. "
+                    "Разбейте на несколько голосовых."
+                )
+                return
+
+            if message.voice.duration > LONG_VOICE_SECONDS:
+                minutes = max(1, round(message.voice.duration / 60))
+                await status_msg.edit_text(
+                    f"⏳ Длинное сообщение ({minutes} мин). "
+                    "Это может занять несколько минут."
+                )
+
             logger.info("Скачиваю аудио, длительность=%ss", message.voice.duration)
             step_start = asyncio.get_running_loop().time()
             temp_path = await asyncio.wait_for(_download_voice(bot, message), timeout=30)
@@ -67,7 +86,8 @@ def create_voice_router(
 
             logger.info("Отправляю в Whisper")
             step_start = asyncio.get_running_loop().time()
-            transcript = await asyncio.wait_for(openai_service.transcribe(temp_path), timeout=180)
+            transcribe_timeout = max(180, min(MAX_TRANSCRIBE_TIMEOUT, int(message.voice.duration * 3)))
+            transcript = await asyncio.wait_for(openai_service.transcribe(temp_path), timeout=transcribe_timeout)
             if not transcript:
                 raise ValueError("Empty transcription")
             logger.info("Транскрипция готова за %.2fs, символов=%s", asyncio.get_running_loop().time() - step_start, len(transcript))

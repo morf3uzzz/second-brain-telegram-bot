@@ -12,7 +12,7 @@ class OpenAIService:
         api_key: str,
         router_model: str = "gpt-4o",
         extract_model: str = "gpt-4o",
-        timeout_seconds: float = 180.0,
+        timeout_seconds: float = 600.0,
     ) -> None:
         self._client = AsyncOpenAI(api_key=api_key, timeout=timeout_seconds)
         self._router_model = router_model
