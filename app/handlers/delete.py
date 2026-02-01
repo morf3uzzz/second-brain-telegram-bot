@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 class DeleteState(StatesGroup):
     selecting = State()
+    confirming = State()
 
 
 def build_delete_keyboard(candidates: list[DeleteCandidate]) -> InlineKeyboardBuilder:
@@ -26,10 +27,29 @@ def build_delete_keyboard(candidates: list[DeleteCandidate]) -> InlineKeyboardBu
 
 
 def format_delete_list(candidates: list[DeleteCandidate]) -> str:
-    lines = ["Выберите запись для удаления (нажмите кнопку с номером):\n"]
+    lines = [
+        f"Найдено записей: {len(candidates)}\n\n"
+        "Выберите запись для удаления (нажмите кнопку с номером):\n"
+    ]
     for idx, c in enumerate(candidates, start=1):
         lines.append(f"{idx}. {c.preview}\n")
     return "".join(lines)
+
+
+def _build_confirm_keyboard() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Удалить", callback_data="del:confirm")
+    kb.button(text="⬅️ Назад к списку", callback_data="del:back")
+    kb.button(text="❌ Отмена", callback_data="del:cancel")
+    kb.adjust(1)
+    return kb
+
+
+async def _safe_edit(callback: CallbackQuery, text: str, reply_markup: InlineKeyboardBuilder | None = None) -> None:
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup.as_markup() if reply_markup else None)
+    except Exception:
+        await callback.message.answer(text, reply_markup=reply_markup.as_markup() if reply_markup else None)
 
 
 def create_delete_router(
@@ -45,7 +65,7 @@ def create_delete_router(
             await callback.answer("Доступ запрещен", show_alert=True)
             return
         await state.clear()
-        await callback.message.answer("Удаление отменено.")
+        await _safe_edit(callback, "Удаление отменено.")
         await callback.answer()
 
     @router.callback_query(F.data.startswith("del:pick:"))
@@ -81,17 +101,89 @@ def create_delete_router(
             preview=candidate_dict["preview"],
         )
 
+        await state.set_state(DeleteState.confirming)
+        await state.update_data(selected_index=index)
+        text = (
+            "⚠️ Подтвердите удаление записи:\n\n"
+            f"{candidate.preview}\n\n"
+            "Удалить?"
+        )
+        await _safe_edit(callback, text, _build_confirm_keyboard())
+        await callback.answer()
+
+    @router.callback_query(DeleteState.confirming, F.data == "del:back")
+    async def back_to_list(callback: CallbackQuery, state: FSMContext) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        data = await state.get_data()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            await state.clear()
+            await _safe_edit(callback, "⚠️ Список кандидатов не найден.")
+            await callback.answer()
+            return
+        kb = build_delete_keyboard(
+            [
+                DeleteCandidate(
+                    sheet_name=c["sheet_name"],
+                    row_index=c["row_index"],
+                    headers=c["headers"],
+                    row_values=c["row_values"],
+                    preview=c["preview"],
+                )
+                for c in candidates
+            ]
+        )
+        text = format_delete_list(
+            [
+                DeleteCandidate(
+                    sheet_name=c["sheet_name"],
+                    row_index=c["row_index"],
+                    headers=c["headers"],
+                    row_values=c["row_values"],
+                    preview=c["preview"],
+                )
+                for c in candidates
+            ]
+        )
+        await state.set_state(DeleteState.selecting)
+        await _safe_edit(callback, text, kb)
+        await callback.answer()
+
+    @router.callback_query(DeleteState.confirming, F.data == "del:confirm")
+    async def confirm_delete(callback: CallbackQuery, state: FSMContext) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        data = await state.get_data()
+        candidates = data.get("candidates", [])
+        index = data.get("selected_index")
+        if not candidates or index is None:
+            await state.clear()
+            await _safe_edit(callback, "⚠️ Список кандидатов не найден.")
+            await callback.answer()
+            return
+        if index < 0 or index >= len(candidates):
+            await callback.answer("Неверный выбор", show_alert=True)
+            return
+        candidate_dict = candidates[index]
+        candidate = DeleteCandidate(
+            sheet_name=candidate_dict["sheet_name"],
+            row_index=candidate_dict["row_index"],
+            headers=candidate_dict["headers"],
+            row_values=candidate_dict["row_values"],
+            preview=candidate_dict["preview"],
+        )
         deleted, inbox_deleted = await delete_service.delete_candidate(candidate)
         await state.clear()
-
         if deleted:
             if inbox_deleted:
-                await callback.message.answer("✅ Запись удалена из листа и Inbox.")
+                await _safe_edit(callback, "✅ Запись удалена из листа и Inbox.")
             else:
-                await callback.message.answer("✅ Запись удалена из листа. Inbox не найден.")
+                await _safe_edit(callback, "✅ Запись удалена из листа. Inbox не найден.")
         else:
-            await callback.message.answer("⚠️ Не удалось удалить запись.")
-
+            await _safe_edit(callback, "⚠️ Не удалось удалить запись.")
         await callback.answer()
 
     return router
