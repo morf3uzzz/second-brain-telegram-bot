@@ -460,9 +460,10 @@ def _build_main_menu(settings) -> InlineKeyboardBuilder:
 def _build_models_menu(current: str) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     models = [
-        ("gpt-4o", "GPT-4o (Умная)", "$2.5/$10"),
-        ("gpt-4o-mini", "GPT-4o Mini (Быстрая)", "$0.15/$0.6"),
-        ("o1-mini", "o1 Mini (Рассуждающая)", "$3/$12"),
+        ("gpt-5-mini", "GPT-5 Mini", "$0.25/$2"),
+        ("gpt-5-nano", "GPT-5 Nano", "$0.05/$0.40"),
+        ("gpt-4.1-mini", "GPT-4.1 Mini", "$0.10/$0.40"),
+        ("gpt-4o-mini", "GPT-4o Mini", "$0.15/$0.60"),
     ]
     for model, label, price in models:
         prefix = "✅ " if model == current else ""

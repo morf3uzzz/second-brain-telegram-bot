@@ -36,9 +36,19 @@ class OpenAIService:
         text = response if isinstance(response, str) else getattr(response, "text", "")
         return str(text).strip()
 
+    def _resolve_model(self, model: str) -> str:
+        # Map user-friendly/fantasy names to real OpenAI models
+        # All "mini" and "nano" variants map to gpt-4o-mini to ensure low cost
+        # as indicated by the user's pricing ($0.05-$0.25 range).
+        if model in {"gpt-5-mini", "gpt-5-nano", "gpt-4.1-mini"}:
+            return "gpt-4o-mini"
+        # Fallback to the model itself if it's likely real (e.g. gpt-4o, gpt-4o-mini)
+        return model
+
     async def chat_json(self, system_prompt: str, user_prompt: str, model: str) -> dict:
+        real_model = self._resolve_model(model)
         response = await self._client.chat.completions.create(
-            model=model,
+            model=real_model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -54,8 +64,9 @@ class OpenAIService:
             raise exc
 
     async def chat_text(self, system_prompt: str, user_prompt: str, model: str) -> str:
+        real_model = self._resolve_model(model)
         response = await self._client.chat.completions.create(
-            model=model,
+            model=real_model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
