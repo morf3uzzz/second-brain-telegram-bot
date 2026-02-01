@@ -74,8 +74,6 @@ def _strong_question_signal(text: str) -> bool:
             "сколько",
             "почему",
             "зачем",
-            "где",
-            "когда",
         ],
     ):
         return True
