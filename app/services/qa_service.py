@@ -143,30 +143,27 @@ def _format_blocks(text: str) -> str:
                 formatted.append(f"🧾 {number}. {parts[0]}")
                 for part in parts[1:]:
                     label = part
-                    emoji = "•"
+                    prefix = "-"
                     if ":" in part:
                         key, value = part.split(":", 1)
                         key_norm = key.strip().lower()
-                        value = value.strip()
-                        emoji_map = {
-                            "дата": "📅",
-                            "дата добавления": "📅",
-                            "дата выполнения": "⏰",
-                            "суть": "📝",
-                            "на что потрачено": "🧾",
-                            "сумма": "💰",
-                            "категория": "🏷️",
-                            "сырой текст": "🗣️",
-                        }
-                        emoji = emoji_map.get(key_norm, "•")
+                        value = _shorten_value(value.strip())
+                        if key_norm in {"дата", "дата добавления"}:
+                            prefix = "📅"
                         label = f"{key.strip()}: {value}"
-                    formatted.append(f"   {emoji} {label}")
+                    formatted.append(f"   {prefix} {label}")
                 formatted.append("")
             else:
                 formatted.append(line)
         else:
             formatted.append(line)
     return "\n".join(formatted).strip()
+
+
+def _shorten_value(value: str, max_len: int = 220) -> str:
+    if len(value) <= max_len:
+        return value
+    return value[: max_len - 3] + "..."
 
 
 @dataclass
