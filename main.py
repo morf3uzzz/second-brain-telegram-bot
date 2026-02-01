@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.handlers.voice import create_voice_router
+from app.handlers.start import create_start_router
 from app.handlers.settings import create_settings_router
 from app.handlers.delete import create_delete_router
 from app.logging_setup import setup_logging
@@ -59,6 +60,13 @@ async def main() -> None:
             intent_service,
             qa_service,
             delete_service,
+            allowed_user_ids=config.allowed_user_ids,
+            allowed_usernames=config.allowed_usernames,
+        )
+    )
+    dp.include_router(
+        create_start_router(
+            settings_service,
             allowed_user_ids=config.allowed_user_ids,
             allowed_usernames=config.allowed_usernames,
         )

@@ -42,37 +42,40 @@ def create_settings_router(
         kb = _build_main_menu(settings)
         await message.answer(
             "⚙️ Настройки.\n\n"
-            "Как пользоваться:\n"
-            "- Просто отправляйте голосовые.\n"
-            "- Бот сам поймёт: добавить / вопрос / удалить.\n"
-            "- Если не хватает обязательных полей (*), он спросит уточнение.",
+            "Коротко:\n"
+            "- Голосовые: добавить / вопрос / удалить определяются автоматически.\n"
+            "- Обязательные поля помечайте * в заголовках.\n"
+            "- Для сводок выберите чат и время.",
             reply_markup=kb.as_markup(),
         )
 
     @router.callback_query(F.data == "menu:main")
-    async def show_main_menu(callback: CallbackQuery) -> None:
+    async def show_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
         if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
             await callback.answer("Доступ запрещен", show_alert=True)
             return
+        await state.clear()
         settings = await settings_service.load()
         kb = _build_main_menu(settings)
         await callback.message.answer("Главное меню настроек:", reply_markup=kb.as_markup())
         await callback.answer()
 
     @router.callback_query(F.data == "menu:prompts")
-    async def show_prompts_menu(callback: CallbackQuery) -> None:
+    async def show_prompts_menu(callback: CallbackQuery, state: FSMContext) -> None:
         if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
             await callback.answer("Доступ запрещен", show_alert=True)
             return
+        await state.clear()
         kb = _build_prompts_menu()
         await callback.message.answer("Промпты:", reply_markup=kb.as_markup())
         await callback.answer()
 
     @router.callback_query(F.data == "menu:summaries")
-    async def show_summaries_menu(callback: CallbackQuery) -> None:
+    async def show_summaries_menu(callback: CallbackQuery, state: FSMContext) -> None:
         if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
             await callback.answer("Доступ запрещен", show_alert=True)
             return
+        await state.clear()
         settings = await settings_service.load()
         kb = _build_summaries_menu(settings)
         await callback.message.answer("Сводки:", reply_markup=kb.as_markup())
@@ -129,7 +132,9 @@ def create_settings_router(
         await state.update_data(prompt_key=ROUTER_PROMPT_KEY)
         await callback.message.answer(
             "Отправьте новый prompt для роутера.\n"
-            "Обязательные плейсхолдеры: {text}, {categories}"
+            "Обязательные плейсхолдеры: {text}, {categories}\n"
+            "Чтобы отменить — напишите «Отмена» или нажмите кнопку.",
+            reply_markup=_build_cancel_menu("menu:prompts").as_markup(),
         )
         await callback.answer()
 
@@ -142,7 +147,9 @@ def create_settings_router(
         await state.update_data(prompt_key=EXTRACT_PROMPT_KEY)
         await callback.message.answer(
             "Отправьте новый prompt для извлечения.\n"
-            "Обязательные плейсхолдеры: {text}, {headers}"
+            "Обязательные плейсхолдеры: {text}, {headers}\n"
+            "Чтобы отменить — напишите «Отмена» или нажмите кнопку.",
+            reply_markup=_build_cancel_menu("menu:prompts").as_markup(),
         )
         await callback.answer()
 
@@ -182,7 +189,12 @@ def create_settings_router(
             await callback.answer("Доступ запрещен", show_alert=True)
             return
         await state.set_state(SettingsState.editing_daily_time)
-        await callback.message.answer("Введите время ежедневной сводки в формате HH:MM.")
+        await callback.message.answer(
+            "Введите время ежедневной сводки в формате HH:MM.\n"
+            "Пример: 21:00\n"
+            "Чтобы отменить — напишите «Отмена» или нажмите кнопку.",
+            reply_markup=_build_cancel_menu("menu:summaries").as_markup(),
+        )
         await callback.answer()
 
     @router.callback_query(F.data == "summary:weekly_time")
@@ -191,7 +203,12 @@ def create_settings_router(
             await callback.answer("Доступ запрещен", show_alert=True)
             return
         await state.set_state(SettingsState.editing_weekly_time)
-        await callback.message.answer("Введите время еженедельной сводки в формате HH:MM.")
+        await callback.message.answer(
+            "Введите время еженедельной сводки в формате HH:MM.\n"
+            "Пример: 20:00\n"
+            "Чтобы отменить — напишите «Отмена» или нажмите кнопку.",
+            reply_markup=_build_cancel_menu("menu:summaries").as_markup(),
+        )
         await callback.answer()
 
     @router.callback_query(F.data == "summary:weekly_day")
@@ -231,12 +248,17 @@ def create_settings_router(
             return
         await state.set_state(SettingsState.editing_timezone)
         await callback.message.answer(
-            "Введите таймзону, например: Europe/Moscow или UTC."
+            "Введите таймзону, например: Europe/Moscow или UTC.\n"
+            "Чтобы отменить — напишите «Отмена» или нажмите кнопку.",
+            reply_markup=_build_cancel_menu("menu:main").as_markup(),
         )
         await callback.answer()
 
     @router.message(SettingsState.editing_daily_time, F.text)
     async def save_daily_time(message: Message, state: FSMContext) -> None:
+        if _is_cancel(message.text):
+            await _cancel_flow(message, state, settings_service)
+            return
         time_text = message.text.strip()
         if not _is_valid_time(time_text):
             await message.answer("⚠️ Неверный формат. Пример: 21:00")
@@ -247,6 +269,9 @@ def create_settings_router(
 
     @router.message(SettingsState.editing_weekly_time, F.text)
     async def save_weekly_time(message: Message, state: FSMContext) -> None:
+        if _is_cancel(message.text):
+            await _cancel_flow(message, state, settings_service)
+            return
         time_text = message.text.strip()
         if not _is_valid_time(time_text):
             await message.answer("⚠️ Неверный формат. Пример: 20:00")
@@ -257,6 +282,9 @@ def create_settings_router(
 
     @router.message(SettingsState.editing_timezone, F.text)
     async def save_timezone(message: Message, state: FSMContext) -> None:
+        if _is_cancel(message.text):
+            await _cancel_flow(message, state, settings_service)
+            return
         tz = message.text.strip()
         try:
             ZoneInfo(tz)
@@ -271,6 +299,9 @@ def create_settings_router(
     async def save_prompt(message: Message, state: FSMContext) -> None:
         if not is_allowed(message.from_user, allowed_user_ids, allowed_usernames):
             await message.answer("⛔️ Доступ запрещен.")
+            return
+        if _is_cancel(message.text):
+            await _cancel_flow(message, state, settings_service)
             return
 
         data = await state.get_data()
@@ -344,6 +375,13 @@ def _build_summaries_menu(settings) -> InlineKeyboardBuilder:
     return kb
 
 
+def _build_cancel_menu(callback_data: str) -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Отмена", callback_data=callback_data)
+    kb.adjust(1)
+    return kb
+
+
 def _is_valid_time(value: str) -> bool:
     if len(value) != 5 or value[2] != ":":
         return False
@@ -353,3 +391,16 @@ def _is_valid_time(value: str) -> bool:
     hour = int(hours)
     minute = int(minutes)
     return 0 <= hour <= 23 and 0 <= minute <= 59
+
+
+def _is_cancel(text: str | None) -> bool:
+    if not text:
+        return False
+    return text.strip().lower() in {"отмена", "cancel", "назад", "back"}
+
+
+async def _cancel_flow(message: Message, state: FSMContext, settings_service: BotSettingsService) -> None:
+    await state.clear()
+    settings = await settings_service.load()
+    kb = _build_main_menu(settings)
+    await message.answer("Ок, отменил. Возвращаюсь в главное меню.", reply_markup=kb.as_markup())
