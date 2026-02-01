@@ -438,6 +438,8 @@ def create_voice_router(
             transcript = item.get("transcript", "")
             today_str = item.get("today_str", datetime.now().strftime("%d.%m.%Y"))
             today_date = _parse_date_value(today_str) or datetime.now().date()
+            if len(row) < len(headers):
+                row.extend([""] * (len(headers) - len(row)))
 
             item_idx = None
             for i, header in enumerate(headers):
@@ -470,6 +472,9 @@ def create_voice_router(
         row = data.get("row", [])
         transcript = data.get("transcript", "")
         today_str = data.get("today_str", datetime.now().strftime("%d.%m.%Y"))
+        today_date = _parse_date_value(today_str) or datetime.now().date()
+        if len(row) < len(headers):
+            row.extend([""] * (len(headers) - len(row)))
 
         if not category or not headers or not row:
             await state.clear()
