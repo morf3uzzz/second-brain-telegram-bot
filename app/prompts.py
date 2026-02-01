@@ -37,5 +37,19 @@ DEFAULT_EXTRACT_USER = (
     "- Не добавляй звёздочки или форматирование в ключах."
 )
 
+DEFAULT_MULTI_SYSTEM = (
+    "Ты разбиваешь один текст на несколько отдельных записей. "
+    "Отвечай только JSON без Markdown. "
+    "Каждая запись должна иметь category из списка и text (краткий фрагмент из исходного текста)."
+)
+
+DEFAULT_MULTI_USER = (
+    "Исходный текст:\n{text}\n\n"
+    "Доступные категории:\n{categories}\n\n"
+    "Верни JSON строго такого вида:\n"
+    '{"items": [{"category": "X", "text": "..."}, {"category": "Y", "text": "..."}]}\n'
+    "Если в тексте только одна запись, верни один элемент в items."
+)
+
 ROUTER_PROMPT_KEY = "router_user"
 EXTRACT_PROMPT_KEY = "extract_user"

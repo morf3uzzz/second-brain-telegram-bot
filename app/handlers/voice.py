@@ -13,7 +13,14 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from gspread.exceptions import WorksheetNotFound
 
-from app.prompts import DEFAULT_EXTRACT_USER, DEFAULT_ROUTER_USER, EXTRACT_PROMPT_KEY, ROUTER_PROMPT_KEY
+from app.prompts import (
+    DEFAULT_EXTRACT_USER,
+    DEFAULT_MULTI_SYSTEM,
+    DEFAULT_MULTI_USER,
+    DEFAULT_ROUTER_USER,
+    EXTRACT_PROMPT_KEY,
+    ROUTER_PROMPT_KEY,
+)
 from app.handlers.delete import DeleteState, build_delete_keyboard, format_delete_list
 from app.services.bot_settings_service import BotSettingsService
 from app.services.delete_service import DeleteService
@@ -145,14 +152,30 @@ def create_voice_router(
             settings = await sheets_service.load_settings()
             logger.info("Категорий найдено: %s", len(settings))
 
-            logger.info("Читаю настройки бота")
-            bot_settings = await settings_service.load()
-            model = bot_settings.openai_model
-
             logger.info("Читаю Prompts из Google Sheets")
             prompts = await sheets_service.get_prompts()
             router_prompt = prompts.get(ROUTER_PROMPT_KEY, DEFAULT_ROUTER_USER)
             extract_prompt = prompts.get(EXTRACT_PROMPT_KEY, DEFAULT_EXTRACT_USER)
+
+            multi_items = await _split_multi_items(
+                openai_service,
+                transcript,
+                settings,
+                model,
+            )
+            if len(multi_items) > 1:
+                await _process_multi_items(
+                    status_msg,
+                    message,
+                    sheets_service,
+                    router_service,
+                    settings,
+                    extract_prompt,
+                    today_str,
+                    multi_items,
+                    model,
+                )
+                return
 
             logger.info("Классифицирую категорию (model=%s)", model)
             try:
@@ -990,6 +1013,105 @@ def _build_category_keyboard(categories: list[str]) -> InlineKeyboardBuilder:
     kb.button(text="Отмена", callback_data="cat:cancel")
     kb.adjust(2)
     return kb
+
+
+async def _split_multi_items(
+    openai_service: OpenAIService,
+    transcript: str,
+    settings: dict[str, str],
+    model: str,
+) -> list[dict[str, str]]:
+    categories_text = "\n".join(
+        f"- {name}: {desc}" if desc else f"- {name}"
+        for name, desc in settings.items()
+    )
+    user_prompt = DEFAULT_MULTI_USER.format(text=transcript, categories=categories_text)
+    try:
+        data = await openai_service.chat_json(
+            system_prompt=DEFAULT_MULTI_SYSTEM,
+            user_prompt=user_prompt,
+            model=model,
+        )
+    except Exception:
+        logger.exception("Failed to split multi items")
+        return [{"category": "", "text": transcript}]
+
+    items = data.get("items", [])
+    if not isinstance(items, list) or not items:
+        return [{"category": "", "text": transcript}]
+
+    normalized_map = {name.strip().lower(): name for name in settings.keys()}
+    result: list[dict[str, str]] = []
+    for item in items:
+        category = str(item.get("category", "")).strip()
+        text = str(item.get("text", "")).strip() or transcript
+        category_norm = category.strip().lower()
+        canonical = normalized_map.get(category_norm)
+        if not canonical:
+            canonical = ""
+        result.append({"category": canonical, "text": text})
+    return result
+
+
+async def _process_multi_items(
+    status_msg: Message,
+    message: Message,
+    sheets_service: SheetsService,
+    router_service: RouterService,
+    settings: dict[str, str],
+    extract_prompt: str,
+    today_str: str,
+    items: list[dict[str, str]],
+    model: str,
+) -> None:
+    results: list[str] = []
+    for item in items:
+        item_text = item.get("text", "")
+        category = item.get("category", "")
+
+        if not category:
+            try:
+                category, _reasoning = await router_service.classify_category(
+                    item_text,
+                    settings,
+                    DEFAULT_ROUTER_USER,
+                    model=model,
+                )
+            except Exception:
+                results.append("⚠️ Не удалось определить категорию для одного пункта.")
+                continue
+
+        try:
+            headers = await sheets_service.get_headers(category)
+            if not headers:
+                results.append(f"⚠️ Не найден лист для категории: {category}")
+                continue
+            clean_headers = [_clean_header(header) for header in headers]
+            row = await router_service.extract_row(
+                item_text,
+                clean_headers,
+                today_str,
+                extract_prompt,
+                model=model,
+            )
+            row = _apply_text_fields(headers, row, item_text)
+
+            duplicate_preview = await _find_duplicate(sheets_service, category, headers, row)
+            if duplicate_preview:
+                results.append(f"⚠️ Дубликат пропущен: {category}")
+                continue
+
+            await sheets_service.append_row(category, row)
+            await sheets_service.append_row("Inbox", [today_str, category, item_text])
+
+            summary = _get_summary_value(headers, row) or _make_summary(item_text)
+            results.append(f"✅ {category}: {summary}")
+        except Exception:
+            logger.exception("Failed to process multi item")
+            results.append("⚠️ Ошибка при обработке одного пункта.")
+
+    text = "Готово. Я разобрал сообщение на несколько пунктов:\n\n" + "\n".join(results)
+    await _send_long_text(status_msg, message, text, safe_mode=True)
 
 
 async def _send_long_text(
