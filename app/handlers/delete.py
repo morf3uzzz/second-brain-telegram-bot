@@ -217,15 +217,6 @@ def _shorten_value(value: str, max_len: int = 200) -> str:
 
 def _field_emoji(label: str) -> str:
     key = label.strip().lower()
-    emoji_map = {
-        "дата": "📅",
-        "дата добавления": "📅",
-        "дата выполнения": "⏰",
-        "суть": "📝",
-        "на что потрачено": "🧾",
-        "сумма": "💰",
-        "категория": "🏷️",
-        "приоритет": "⭐️",
-        "сырой текст": "🗣️",
-    }
-    return emoji_map.get(key, "•")
+    if key in {"дата", "дата добавления", "date"}:
+        return "📅"
+    return "-"
