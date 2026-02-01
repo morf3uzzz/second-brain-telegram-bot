@@ -39,26 +39,68 @@ def create_settings_router(
             return
 
         settings = await settings_service.load()
-        kb = InlineKeyboardBuilder()
-        kb.button(text="Настроить prompt роутера", callback_data="prompt:router")
-        kb.button(text="Настроить prompt извлечения", callback_data="prompt:extract")
-        kb.button(text="Показать текущие prompts", callback_data="prompt:show")
-        kb.button(text="Сводки: этот чат", callback_data="summary:set_chat")
-        kb.button(
-            text=f"Сводки: дневные {'✅' if settings.daily_enabled else '❌'}",
-            callback_data="summary:toggle_daily",
+        kb = _build_main_menu(settings)
+        await message.answer(
+            "⚙️ Настройки.\n\n"
+            "Как пользоваться:\n"
+            "- Просто отправляйте голосовые.\n"
+            "- Бот сам поймёт: добавить / вопрос / удалить.\n"
+            "- Если не хватает обязательных полей (*), он спросит уточнение.",
+            reply_markup=kb.as_markup(),
         )
-        kb.button(
-            text=f"Сводки: недельные {'✅' if settings.weekly_enabled else '❌'}",
-            callback_data="summary:toggle_weekly",
-        )
-        kb.button(text=f"Время дня: {settings.daily_time}", callback_data="summary:daily_time")
-        kb.button(text=f"День недели: {settings.weekly_day}", callback_data="summary:weekly_day")
-        kb.button(text=f"Время недели: {settings.weekly_time}", callback_data="summary:weekly_time")
-        kb.button(text=f"Таймзона: {settings.timezone}", callback_data="summary:timezone")
-        kb.adjust(1)
 
-        await message.answer("⚙️ Настройки:", reply_markup=kb.as_markup())
+    @router.callback_query(F.data == "menu:main")
+    async def show_main_menu(callback: CallbackQuery) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        settings = await settings_service.load()
+        kb = _build_main_menu(settings)
+        await callback.message.answer("Главное меню настроек:", reply_markup=kb.as_markup())
+        await callback.answer()
+
+    @router.callback_query(F.data == "menu:prompts")
+    async def show_prompts_menu(callback: CallbackQuery) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        kb = _build_prompts_menu()
+        await callback.message.answer("Промпты:", reply_markup=kb.as_markup())
+        await callback.answer()
+
+    @router.callback_query(F.data == "menu:summaries")
+    async def show_summaries_menu(callback: CallbackQuery) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        settings = await settings_service.load()
+        kb = _build_summaries_menu(settings)
+        await callback.message.answer("Сводки:", reply_markup=kb.as_markup())
+        await callback.answer()
+
+    @router.callback_query(F.data == "menu:timezone")
+    async def show_timezone_menu(callback: CallbackQuery, state: FSMContext) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        await state.set_state(SettingsState.editing_timezone)
+        await callback.message.answer(
+            "Введите таймзону, например: Europe/Moscow или UTC."
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "menu:help")
+    async def show_help(callback: CallbackQuery) -> None:
+        if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
+            await callback.answer("Доступ запрещен", show_alert=True)
+            return
+        await callback.message.answer(
+            "Краткая помощь:\n"
+            "- Голосом: добавление / вопрос / удаление определяются автоматически.\n"
+            "- Обязательные поля отмечайте * в заголовках.\n"
+            "- Для удаления бот пришлёт список и кнопки с номерами."
+        )
+        await callback.answer()
 
 
     @router.callback_query(F.data == "prompt:show")
@@ -261,6 +303,45 @@ def _missing_placeholders(key: str, text: str) -> list[str]:
     if key == EXTRACT_PROMPT_KEY:
         required = ["{text}", "{headers}"]
     return [ph for ph in required if ph not in text]
+
+
+def _build_main_menu(settings) -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Промпты", callback_data="menu:prompts")
+    kb.button(text="Сводки", callback_data="menu:summaries")
+    kb.button(text=f"Таймзона: {settings.timezone}", callback_data="menu:timezone")
+    kb.button(text="Помощь", callback_data="menu:help")
+    kb.adjust(2, 2)
+    return kb
+
+
+def _build_prompts_menu() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Показать prompts", callback_data="prompt:show")
+    kb.button(text="Изменить router", callback_data="prompt:router")
+    kb.button(text="Изменить extract", callback_data="prompt:extract")
+    kb.button(text="Назад", callback_data="menu:main")
+    kb.adjust(1)
+    return kb
+
+
+def _build_summaries_menu(settings) -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Этот чат для сводок", callback_data="summary:set_chat")
+    kb.button(
+        text=f"Ежедневные {'✅' if settings.daily_enabled else '❌'}",
+        callback_data="summary:toggle_daily",
+    )
+    kb.button(
+        text=f"Еженедельные {'✅' if settings.weekly_enabled else '❌'}",
+        callback_data="summary:toggle_weekly",
+    )
+    kb.button(text=f"Время дня: {settings.daily_time}", callback_data="summary:daily_time")
+    kb.button(text=f"День недели: {settings.weekly_day}", callback_data="summary:weekly_day")
+    kb.button(text=f"Время недели: {settings.weekly_time}", callback_data="summary:weekly_time")
+    kb.button(text="Назад", callback_data="menu:main")
+    kb.adjust(1)
+    return kb
 
 
 def _is_valid_time(value: str) -> bool:

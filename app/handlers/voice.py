@@ -128,8 +128,9 @@ def create_voice_router(
             logger.info("Нашел столбцы: %s", headers)
 
             logger.info("Извлекаю данные под заголовки")
+            clean_headers = [_clean_header(header) for header in headers]
             row = await asyncio.wait_for(
-                router_service.extract_row(transcript, headers, today_str, extract_prompt),
+                router_service.extract_row(transcript, clean_headers, today_str, extract_prompt),
                 timeout=60,
             )
 
@@ -283,6 +284,10 @@ def _get_missing_required(headers: list[str], row: list[str]) -> list[tuple[int,
 
 
 def _display_header(header: str) -> str:
+    return header.replace("*", "").strip()
+
+
+def _clean_header(header: str) -> str:
     return header.replace("*", "").strip()
 
 
