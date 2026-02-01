@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 MAX_VOICE_SECONDS = 12 * 60
 LONG_VOICE_SECONDS = 6 * 60
+LONG_TRANSCRIPT_CHARS = 2500
 MAX_TRANSCRIBE_TIMEOUT = 900
 MAX_TG_CHARS = 3500
 
@@ -118,6 +119,12 @@ def create_voice_router(
             intent = await intent_service.detect(transcript, model=model)
             action = intent.get("action", "add")
             query = intent.get("query", transcript)
+            if action == "ask" and (
+                message.voice.duration >= LONG_VOICE_SECONDS
+                or len(transcript) >= LONG_TRANSCRIPT_CHARS
+            ) and not _explicit_question_command(transcript):
+                action = "add"
+                query = transcript
 
             if action == "ask":
                 logger.info("Режим вопроса")
@@ -1284,6 +1291,18 @@ def _explicit_category_signals(text: str) -> set[str]:
     if _contains_keywords(lowered, ["потрат", "заплатил", "купил", "расход", "руб", "доллар", "магазин"]):
         signals.add("expense")
     return signals
+
+
+def _explicit_question_command(text: str) -> bool:
+    lowered = text.strip().lower()
+    if "?" in lowered:
+        return True
+    return bool(
+        re.match(
+            r"^(вопрос|спроси|узнай|расскажи|объясни|подскажи|помоги|покажи|найди|сколько|что|как|почему|зачем)\b",
+            lowered,
+        )
+    )
 
 
 def _rule_based_items_from_transcript(
