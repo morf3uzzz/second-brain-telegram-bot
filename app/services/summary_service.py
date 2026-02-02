@@ -42,7 +42,8 @@ class SummaryService:
         if not rows:
             return []
         # Skip header row if first cell doesn't look like a date (DD.MM.YYYY or YYYY-MM-DD)
-        first_cell = (rows[0][0] or "").strip()
+        first_row = rows[0]
+        first_cell = (first_row[0] if len(first_row) > 0 else "").strip()
         if _parse_date(first_cell) is not None:
             data_rows = rows
         else:
