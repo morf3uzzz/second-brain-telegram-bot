@@ -3,6 +3,8 @@ from collections import Counter
 from datetime import date, datetime, timedelta
 from typing import List, Tuple
 
+import gspread.exceptions
+
 from app.services.openai_service import OpenAIService
 from app.services.sheets_service import SheetsService
 
@@ -32,10 +34,20 @@ class SummaryService:
         return await self._build_summary(filtered, period)
 
     async def _get_inbox_rows(self) -> List[List[str]]:
-        rows = await self._sheets.get_all_values("Inbox")
+        try:
+            rows = await self._sheets.get_all_values("Inbox")
+        except gspread.exceptions.WorksheetNotFound:
+            logger.warning("Inbox sheet not found, summary will be empty")
+            return []
         if not rows:
             return []
-        return [row for row in rows[1:] if row]
+        # Skip header row if first cell doesn't look like a date (DD.MM.YYYY or YYYY-MM-DD)
+        first_cell = (rows[0][0] or "").strip()
+        if _parse_date(first_cell) is not None:
+            data_rows = rows
+        else:
+            data_rows = rows[1:]
+        return [row for row in data_rows if row]
 
     async def _build_summary(self, rows: List[List[str]], period: str) -> Tuple[str, int]:
         if not rows:

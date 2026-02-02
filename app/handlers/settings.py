@@ -7,7 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from datetime import date
+from datetime import date, datetime
 
 from app.prompts import DEFAULT_EXTRACT_USER, DEFAULT_ROUTER_USER, EXTRACT_PROMPT_KEY, ROUTER_PROMPT_KEY
 from app.services.bot_settings_service import BotSettingsService
@@ -452,7 +452,13 @@ def create_settings_router(
         if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
             await callback.answer("Доступ запрещен", show_alert=True)
             return
-        text, _count = await summary_service.daily_summary(date.today())
+        settings = await settings_service.load()
+        try:
+            tz = ZoneInfo(settings.timezone)
+        except Exception:
+            tz = ZoneInfo("UTC")
+        today = datetime.now(tz).date()
+        text, _count = await summary_service.daily_summary(today)
         await callback.message.answer(text)
         await callback.answer()
 
@@ -461,7 +467,13 @@ def create_settings_router(
         if not is_allowed(callback.from_user, allowed_user_ids, allowed_usernames):
             await callback.answer("Доступ запрещен", show_alert=True)
             return
-        text, _count = await summary_service.weekly_summary(date.today())
+        settings = await settings_service.load()
+        try:
+            tz = ZoneInfo(settings.timezone)
+        except Exception:
+            tz = ZoneInfo("UTC")
+        today = datetime.now(tz).date()
+        text, _count = await summary_service.weekly_summary(today)
         await callback.message.answer(text)
         await callback.answer()
 

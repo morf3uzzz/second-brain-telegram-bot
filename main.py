@@ -43,6 +43,7 @@ async def main() -> None:
         spreadsheet_id=config.google_sheet_id,
         service_account_path=service_account_path,
     )
+    await sheets_service.ensure_worksheet("Inbox", rows=1000, cols=10)
     router_service = RouterService(openai_service)
     intent_service = IntentService(openai_service)
     settings_service = BotSettingsService(base_dir / "data" / "settings.json")

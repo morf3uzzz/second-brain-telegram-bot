@@ -6,6 +6,7 @@ import re
 import tempfile
 from datetime import date, datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
@@ -120,6 +121,13 @@ def create_voice_router(
             logger.info("Читаю настройки бота")
             bot_settings = await settings_service.load()
             model = bot_settings.openai_model
+            try:
+                tz = ZoneInfo(bot_settings.timezone)
+            except Exception:
+                tz = ZoneInfo("UTC")
+            now_tz = datetime.now(tz)
+            today_str = now_tz.strftime("%d.%m.%Y")
+            today_date = now_tz.date()
 
             if (
                 message.voice.duration >= THINKING_MODE_SECONDS
