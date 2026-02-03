@@ -189,46 +189,51 @@ def create_voice_router(
             router_prompt = prompts.get(ROUTER_PROMPT_KEY, DEFAULT_ROUTER_USER)
             extract_prompt = prompts.get(EXTRACT_PROMPT_KEY, DEFAULT_EXTRACT_USER)
 
-            multi_items = await _split_multi_items(
-                openai_service,
-                transcript,
-                settings,
-                model,
-            )
-            if len(multi_items) > 1:
-                await _process_multi_items(
-                    status_msg,
-                    message,
-                    state,
-                    sheets_service,
-                    router_service,
+            explicit_category = _get_explicit_requested_category(transcript, settings)
+            if explicit_category:
+                category = explicit_category
+                logger.info("Пользователь явно указал категорию: %s", category)
+            else:
+                multi_items = await _split_multi_items(
+                    openai_service,
+                    transcript,
                     settings,
-                    extract_prompt,
-                    today_str,
-                    multi_items,
                     model,
-                    transcript,
                 )
-                return
+                if len(multi_items) > 1:
+                    await _process_multi_items(
+                        status_msg,
+                        message,
+                        state,
+                        sheets_service,
+                        router_service,
+                        settings,
+                        extract_prompt,
+                        today_str,
+                        multi_items,
+                        model,
+                        transcript,
+                    )
+                    return
 
-            logger.info("Классифицирую категорию (model=%s)", model)
-            try:
-                category, _reasoning = await asyncio.wait_for(
-                    router_service.classify_category(transcript, settings, router_prompt, model=model),
-                    timeout=60,
-                )
-            except Exception:
-                logger.exception("Failed to classify category")
-                categories = list(settings.keys())
-                await _prompt_category_choice(
-                    status_msg,
-                    state,
-                    categories,
-                    transcript,
-                    today_str,
-                )
-                return
-            logger.info("Определил категорию: %s", category)
+                logger.info("Классифицирую категорию (model=%s)", model)
+                try:
+                    category, _reasoning = await asyncio.wait_for(
+                        router_service.classify_category(transcript, settings, router_prompt, model=model),
+                        timeout=60,
+                    )
+                except Exception:
+                    logger.exception("Failed to classify category")
+                    categories = list(settings.keys())
+                    await _prompt_category_choice(
+                        status_msg,
+                        state,
+                        categories,
+                        transcript,
+                        today_str,
+                    )
+                    return
+                logger.info("Определил категорию: %s", category)
 
             logger.info("Читаю заголовки листа: %s", category)
             headers = await sheets_service.get_headers(category)
@@ -1339,6 +1344,29 @@ def _explicit_category_signals(text: str) -> set[str]:
     if _contains_keywords(lowered, ["потрат", "заплатил", "купил", "расход", "руб", "доллар", "магазин"]):
         signals.add("expense")
     return signals
+
+
+def _get_explicit_requested_category(transcript: str, settings: dict[str, str]) -> str | None:
+    """Если пользователь явно просит «занеси как идею» / «добавь в идеи» и т.п. — вернуть категорию, иначе None."""
+    lowered = transcript.strip().lower()
+    idea_phrases = [
+        "занеси как идею", "занеси мне как идею", "добавь как идею", "запиши как идею",
+        "в идеи", "в идеи занеси", "добавь в идеи", "запиши в идеи",
+        "это идея", "это одна идея", "одна идея",
+    ]
+    task_phrases = [
+        "занеси как задачу", "добавь как задачу", "запиши как задачу",
+        "в задачи", "добавь в задачи", "это задача",
+    ]
+    if any(p in lowered for p in idea_phrases):
+        cat = _find_category_by_keywords(settings, ["иде", "idea"])
+        if cat:
+            return cat
+    if any(p in lowered for p in task_phrases):
+        cat = _find_category_by_keywords(settings, ["задач", "task", "todo"])
+        if cat:
+            return cat
+    return None
 
 
 def _coerce_list(value: object) -> list[str]:
