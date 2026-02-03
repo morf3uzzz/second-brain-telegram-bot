@@ -9,6 +9,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -1728,6 +1729,15 @@ async def _send_long_text(
         await message.answer(chunk)
 
 
+async def _safe_edit_message(msg: Message, text: str, reply_markup=None) -> None:
+    """Edit message; ignore TelegramBadRequest when content is unchanged."""
+    try:
+        await msg.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in (str(e.message or "").lower()):
+            raise
+
+
 async def _prompt_required_item(target_msg: Message, state: FSMContext) -> None:
     data = await state.get_data()
     pending = data.get("pending_items", [])
@@ -1743,13 +1753,15 @@ async def _prompt_required_item(target_msg: Message, state: FSMContext) -> None:
         return
     if len(missing_required) == 1 and _is_priority_header(missing_required[0][1]):
         kb = _build_priority_keyboard()
-        await target_msg.edit_text(
+        await _safe_edit_message(
+            target_msg,
             "⚠️ Нужно выбрать приоритет задачи:",
             reply_markup=kb.as_markup(),
         )
         return
     missing_names = ", ".join(name for _idx, name in missing_required)
-    await target_msg.edit_text(
+    await _safe_edit_message(
+        target_msg,
         "⚠️ Нужно заполнить обязательные поля:\n"
         f"{missing_names}\n\n"
         "Напишите ответ так:\n"
