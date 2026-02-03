@@ -1734,7 +1734,8 @@ async def _safe_edit_message(msg: Message, text: str, reply_markup=None) -> None
     try:
         await msg.edit_text(text, reply_markup=reply_markup)
     except TelegramBadRequest as e:
-        if "message is not modified" not in (str(e.message or "").lower()):
+        err_text = (getattr(e, "message", None) or str(e) or "").lower()
+        if "message is not modified" not in err_text and "same as a current" not in err_text:
             raise
 
 
